@@ -1,0 +1,11 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/shared" },
+    { "path": "packages/validators" },
+    { "path": "packages/context-engine" },
+    { "path": "packages/llm-client" },
+    { "path": "packages/agent-core" },
+    { "path": "apps/ci-review-bot" }
+  ]
+}

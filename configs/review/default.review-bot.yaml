@@ -1,0 +1,56 @@
+# Default review configuration — PRD v6.5 §10 (id="default-config-v65").
+review:
+  enabled: true
+  blocking: false
+  debounce_seconds: 30
+  max_debounce_seconds: 120
+  wait_for_checks: true
+  wait_for_checks_timeout_seconds: 300
+  max_inline_comments: 10
+  group_low_severity: true
+  suppress_style_comments: true
+  confidence_threshold: 0.80
+  high_severity_confidence_threshold: 0.90
+  require_deterministic_evidence_for_high_severity: true
+  skip_draft_prs_by_default: true
+  review_bot_authored_prs_by_default: false
+context:
+  max_files: 40
+  max_changed_lines: 1200
+  max_file_bytes: 80000
+  max_diff_hunk_lines: 500
+  ignore_lockfiles_by_default: true
+  ignore_generated_files: true
+  ignore_minified_files: true
+  ignore_binary_files: true
+  prioritize_high_risk_paths: true
+  symbol_skeleton_enabled: true
+webhook_idempotency:
+  enabled: true
+  ttl_hours: 24
+  durable_store: postgres
+  fast_lock_store: redis
+  require_payload_hash_match: true
+  duplicate_delivery_response: "noop_accepted"
+pending_posts:
+  durable_outbox: "postgres"
+  hot_schedule_store: "redis"
+  recover_on_startup: true
+  row_claim_strategy: "select_for_update_skip_locked"
+  lock_ttl_seconds: 120
+  max_retries: 3
+  require_comment_marker: true
+  expire_after_hours: 24
+  default_submission_strategy: "batched_review"
+github_integration:
+  block_on_status:
+    - SUSPENDED
+    - REVOKED
+    - INSTALLATION_NOT_FOUND
+    - REAUTH_REQUIRED
+  require_reauth_validation: true
+  stop_pending_post_retries_when_severed: true
+  token_refresh:
+    refresh_before_expiry_seconds: 300
+    max_refresh_retries: 2
+    token_expired_is_retryable: true

@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../packages/shared" },
+    { "path": "../../packages/context-engine" },
+    { "path": "../../packages/validators" },
+    { "path": "../../packages/agent-core" },
+    { "path": "../../packages/llm-client" }
+  ]
+}
