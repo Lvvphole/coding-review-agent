@@ -1,0 +1,26 @@
+# GitHub App manifest — PRD v6.5 §11 (id="github-app-manifest-yaml").
+# FR-APP-001..004: permissions and event subscriptions are defined here and
+# verified minimal at security review.
+github_app:
+  name: "Agentic AI CI Code Review Bot"
+  permissions:
+    contents: read
+    pull_requests: write
+    checks: write
+    metadata: read
+    issues: read
+    members: read
+  events:
+    - pull_request
+    - check_suite
+    - check_run
+    - workflow_run
+    - installation
+    - installation_repositories
+  pull_request_actions:
+    - opened
+    - synchronize
+    - reopened
+    - closed
+    - ready_for_review
+    - converted_to_draft

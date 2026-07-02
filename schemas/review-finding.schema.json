@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "review-finding-schema-v65",
+  "type": "object",
+  "required": [
+    "finding_id",
+    "severity",
+    "category",
+    "file",
+    "line",
+    "title",
+    "evidence",
+    "recommendation",
+    "confidence",
+    "agent_source",
+    "root_cause_id",
+    "root_cause_family",
+    "root_cause_source",
+    "taxonomy_version"
+  ],
+  "properties": {
+    "finding_id": { "type": "string" },
+    "severity": { "enum": ["low", "medium", "high", "critical"] },
+    "category": {
+      "enum": ["bug", "security", "test_gap", "performance", "maintainability", "style"]
+    },
+    "file": { "type": "string" },
+    "line": { "type": "integer" },
+    "title": { "type": "string" },
+    "evidence": { "type": "string" },
+    "recommendation": { "type": "string" },
+    "suggested_patch": { "type": "string" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "agent_source": { "type": "string" },
+    "root_cause_id": { "type": "string" },
+    "root_cause_family": { "type": "string" },
+    "root_cause_source": {
+      "enum": ["global", "organization_extension", "repository_extension"]
+    },
+    "taxonomy_version": { "type": "string" },
+    "repo_root_cause_id": { "type": "string" },
+    "merged_from": { "type": "array", "items": { "type": "string" } },
+    "disposition": {
+      "enum": [
+        "VALIDATED",
+        "REJECTED_SCHEMA",
+        "REJECTED_EVIDENCE",
+        "REJECTED_LINE_MAPPING",
+        "REJECTED_CONFIDENCE",
+        "DEDUPED",
+        "NEEDS_TAXONOMY_MAPPING",
+        "POSTED",
+        "STALE_DISCARDED"
+      ]
+    }
+  }
+}

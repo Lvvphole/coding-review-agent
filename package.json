@@ -1,0 +1,28 @@
+{
+  "name": "agentic-ci-review-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agentic AI CI Code Review Bot — implementation of PRD v6.5",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:all": "vitest run",
+    "db:up": "docker compose -f infra/docker-compose.yml up -d --wait",
+    "db:down": "docker compose -f infra/docker-compose.yml down -v",
+    "db:migrate": "tsx apps/ci-review-bot/src/db/migrate.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.20.0",
+    "ioredis": "^5.11.1",
+    "pg": "^8.22.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

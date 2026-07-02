@@ -1,0 +1,27 @@
+# High-risk path classification — PRD v6.5 §15.9 (id="high-risk-yaml-v65").
+# FR-RISK-002/003: repository config may add paths but may not remove global
+# security defaults unless organization policy allows.
+high_risk_paths:
+  security:
+    - "**/auth/**"
+    - "**/authentication/**"
+    - "**/authorization/**"
+    - "**/permissions/**"
+    - "**/rbac/**"
+    - "**/middleware/**"
+  data_access:
+    - "**/db/**"
+    - "**/database/**"
+    - "**/migrations/**"
+    - "**/repositories/**"
+  payments:
+    - "**/billing/**"
+    - "**/payments/**"
+    - "**/checkout/**"
+  infrastructure:
+    - "**/infra/**"
+    - "**/terraform/**"
+    - "**/.github/workflows/**"
+  secrets:
+    - "**/.env*"
+    - "**/secrets/**"
