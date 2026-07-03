@@ -6,6 +6,7 @@
     { "path": "packages/context-engine" },
     { "path": "packages/llm-client" },
     { "path": "packages/agent-core" },
-    { "path": "apps/ci-review-bot" }
+    { "path": "apps/ci-review-bot" },
+    { "path": "apps/llm-gateway" }
   ]
 }

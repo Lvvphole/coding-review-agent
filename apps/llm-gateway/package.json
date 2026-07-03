@@ -1,0 +1,16 @@
+{
+  "name": "@review-bot/llm-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc -b",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@review-bot/shared": "workspace:*",
+    "@review-bot/llm-client": "workspace:*",
+    "@review-bot/validators": "workspace:*"
+  }
+}
