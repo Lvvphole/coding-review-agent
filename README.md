@@ -1,6 +1,6 @@
 # Agentic AI CI Code Review Bot
 
-![Status](https://img.shields.io/badge/status-sprint%202%20complete-blue) ![Tests](https://img.shields.io/badge/tests-100%20passing-brightgreen) ![Node](https://img.shields.io/badge/node-%3E%3D22-3c873a) ![pnpm](https://img.shields.io/badge/pnpm-10.33-f69220) ![TypeScript](https://img.shields.io/badge/TypeScript-5.7%20strict-3178c6) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791) ![Redis](https://img.shields.io/badge/Redis-7-dc382d)
+[![CI](https://github.com/Lvvphole/coding-review-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Lvvphole/coding-review-agent/actions/workflows/ci.yml) ![Status](https://img.shields.io/badge/status-sprint%202%20complete-blue) ![Node](https://img.shields.io/badge/node-%3E%3D22-3c873a) ![pnpm](https://img.shields.io/badge/pnpm-10.33-f69220) ![TypeScript](https://img.shields.io/badge/TypeScript-5.7%20strict-3178c6) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791) ![Redis](https://img.shields.io/badge/Redis-7-dc382d)
 
 A production-grade pull-request review system implementing the **Agentic AI CI Code Review Bot PRD v6.5**. It is not an LLM wrapper: it is a deterministic CI workflow with controlled agentic review, durable Postgres fencing, edge webhook idempotency, distributed pending-post locking, and validated-only GitHub posting.
 

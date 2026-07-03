@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: review_bot
+          POSTGRES_PASSWORD: review_bot_dev
+          POSTGRES_DB: review_bot
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U review_bot -d review_bot"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+      redis:
+        image: redis:7
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Version comes from package.json "packageManager" — action-setup
+      # errors if both are specified.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (strict type-check)
+        run: pnpm build
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Integration tests (real Postgres + Redis)
+        run: pnpm test:integration
+        env:
+          DATABASE_URL: postgres://review_bot:review_bot_dev@localhost:5433/review_bot
+          REDIS_URL: redis://localhost:6380
