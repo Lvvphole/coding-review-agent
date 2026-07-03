@@ -158,6 +158,12 @@ describe('github boundary e2e', () => {
     const marker = parseMarker(inline[0]!.body);
     expect(marker?.headSha).toBe('sha-a');
     expect(await runStatus()).toEqual(['COMPLETED']);
+
+    // FR-CHECK-001/002: check run reported in_progress then completed,
+    // with a non-blocking conclusion (§23.3 CI rule).
+    const statuses = server.checkRuns.map((c) => c['status']);
+    expect(statuses).toEqual(['in_progress', 'completed']);
+    expect(server.checkRuns[1]!['conclusion']).toBe('neutral');
   });
 
   it('FR-EXEC-006: QUEUED run survives "restart" — a fresh executor picks it up', async () => {

@@ -23,6 +23,7 @@ export class FakeGitHubServer {
   public tokenTtlSeconds = 3600;
   public headSha = 'sha-a';
   public diff = '';
+  public checkRuns: Record<string, unknown>[] = [];
   private nextId = 100;
 
   async start(): Promise<void> {
@@ -81,6 +82,10 @@ export class FakeGitHubServer {
       }
       if (req.method === 'POST' && url === '/graphql') {
         return json(200, { data: { minimizeComment: { minimizedComment: { isMinimized: true } } } });
+      }
+      if (req.method === 'POST' && /\/check-runs$/.test(url)) {
+        this.checkRuns.push(JSON.parse(body) as Record<string, unknown>);
+        return json(201, { id: this.nextId++ });
       }
       json(404, { message: `unhandled ${req.method} ${url}` });
     });

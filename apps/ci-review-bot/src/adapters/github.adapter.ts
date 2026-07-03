@@ -74,6 +74,21 @@ export interface GitHubAdapter {
   minimizeComment(comment: PostedComment): Promise<boolean>;
   /** Appends the [Outdated Code State] marker, preserving the thread (FR-POST-033). */
   appendOutdatedMarker(repo: string, commentId: string, currentBody: string): Promise<void>;
+  /**
+   * Creates/updates the review-status check run (FR-CHECK-001/002). Failures
+   * must never bypass comment validation or fail the run (FR-CHECK-005) —
+   * callers wrap this in try/catch.
+   */
+  upsertCheckRun(input: CheckRunUpdate): Promise<void>;
+}
+
+export interface CheckRunUpdate {
+  repo: string;
+  headSha: string;
+  status: 'queued' | 'in_progress' | 'completed';
+  /** Required when status is completed. */
+  conclusion?: 'success' | 'failure' | 'neutral' | 'cancelled';
+  summary: string;
 }
 
 /** Deterministic in-memory fake for tests and simulate-pr-review. */
@@ -145,5 +160,11 @@ export class FakeGitHubAdapter implements GitHubAdapter {
 
   async appendOutdatedMarker(_repo: string, commentId: string, currentBody: string): Promise<void> {
     this.editedBodies.set(commentId, `${currentBody}\n\n> [Outdated Code State]`);
+  }
+
+  public readonly checkRuns: CheckRunUpdate[] = [];
+
+  async upsertCheckRun(input: CheckRunUpdate): Promise<void> {
+    this.checkRuns.push(input);
   }
 }

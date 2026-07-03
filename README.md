@@ -4,7 +4,7 @@
 
 # Agentic AI CI Code Review Bot
 
-[![CI](https://github.com/Lvvphole/coding-review-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Lvvphole/coding-review-agent/actions/workflows/ci.yml) ![Status](https://img.shields.io/badge/status-sprint%203%20complete-blue) ![Node](https://img.shields.io/badge/node-%3E%3D22-3c873a) ![pnpm](https://img.shields.io/badge/pnpm-10.33-f69220) ![TypeScript](https://img.shields.io/badge/TypeScript-5.7%20strict-3178c6) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791) ![Redis](https://img.shields.io/badge/Redis-7-dc382d)
+[![CI](https://github.com/Lvvphole/coding-review-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Lvvphole/coding-review-agent/actions/workflows/ci.yml) ![Status](https://img.shields.io/badge/status-sprint%204%20complete-blue) ![Node](https://img.shields.io/badge/node-%3E%3D22-3c873a) ![pnpm](https://img.shields.io/badge/pnpm-10.33-f69220) ![TypeScript](https://img.shields.io/badge/TypeScript-5.7%20strict-3178c6) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791) ![Redis](https://img.shields.io/badge/Redis-7-dc382d)
 
 A production-grade pull-request review system implementing the **Agentic AI CI Code Review Bot PRD v6.5**. It is not an LLM wrapper: it is a deterministic CI workflow with controlled agentic review, durable Postgres fencing, edge webhook idempotency, distributed pending-post locking, and validated-only GitHub posting.
 
@@ -106,7 +106,7 @@ flowchart LR
     WH --> RD
     WH --> PG
     SM --> CE --> AG --> VA --> PW
-    AG --> LC --> GW[LLM Gateway<br/>stub in Sprint 1]
+    AG --> LC --> GW[LLM Gateway<br/>apps/llm-gateway]
     PW --> OB --> PG
     PW --> GH
 ```
@@ -123,7 +123,7 @@ Postgres is the single correctness authority: run fencing, webhook deliveries, t
 | Hot-path state | Redis 7 / Valkey (`ioredis`) | Debounce, SETNX fast locks, scheduling |
 | Testing | Vitest 3 | Unit + integration (real Postgres/Redis, serial) |
 | Local infra | Docker Compose | `infra/docker-compose.yml` |
-| LLM access | Gateway request contract (PRD §19.2) | Stub client in Sprint 1; no provider keys in the bot |
+| LLM access | LLM Gateway service (`apps/llm-gateway`) | Signed policy, quota leases, provider dispatch; no provider keys in the bot |
 
 ## Getting Started
 
@@ -135,8 +135,8 @@ cd coding-review-agent
 pnpm install
 pnpm db:up            # Postgres on :5433, Redis on :6380
 pnpm build
-pnpm test             # 48 unit tests
-pnpm test:integration # 33 integration tests against real stores
+pnpm test             # unit tests
+pnpm test:integration # integration tests against real stores
 ```
 
 Run the webhook service locally:
@@ -235,7 +235,7 @@ agentic-ci-review-bot/
 | 1 | Core review path skeleton: webhook → fencing → context → agents (stub Gateway) → validators → posting with marker idempotency; docker-compose infra | **Complete** |
 | 2 | Real GitHub boundary: App auth with token refresh, REST/GraphQL adapter, read-path backoff, durable run executor + posting worker, post-flight reconciliation actions, dry-run mode | **Complete** |
 | 3 | LLM Gateway service: signed policy bundles, bit-masked routing, quota leases, metadata signing, Anthropic provider, embeddings endpoint | **Complete** |
-| 4 | Context depth: Symbol Skeleton, AST chunking, language matrix, taxonomy compilation, YAML config loading, check-run reporter | Planned |
+| 4 | Context depth: Symbol Skeleton, high-risk chunking, language matrix, taxonomy compilation with alias mapping, YAML config loading, check-run reporter | **Complete** |
 | 5+ | Control Plane workers (watchdog, retention, spend ledger), telemetry/event bus, multi-tenant isolation, eval pipeline | Planned |
 
 Full deferral details per sprint live in [`docs/sprints/sprint-01.md`](docs/sprints/sprint-01.md).

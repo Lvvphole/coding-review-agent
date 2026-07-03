@@ -1,6 +1,7 @@
 import type { FindingDisposition, ReviewFinding } from '@review-bot/shared';
 import { validateFindingSchema } from './schema.validator.js';
 import { validateLineMapping, type DiffLineIndex } from './line-mapping.validator.js';
+import { mapRootCause, type CompiledTaxonomy } from './taxonomy.js';
 
 /**
  * Post-LLM validation pipeline (HARD-RULE-008, HARD-RULE-010).
@@ -20,6 +21,12 @@ export interface ValidationPolicy {
   requireDeterministicEvidenceForHighSeverity: boolean;
   /** Approved taxonomy IDs (global + compiled extensions) — §16. */
   approvedRootCauseIds: ReadonlySet<string>;
+  /**
+   * Compiled taxonomy with alias mapping (TAX-005). When present, agent
+   * aliases are canonicalized before approval checking; approvedRootCauseIds
+   * alone still works for tests and minimal setups.
+   */
+  taxonomy?: CompiledTaxonomy;
 }
 
 export interface ValidatedFinding {
@@ -82,8 +89,22 @@ export function validateFinding(
     };
   }
 
-  // Taxonomy — FR-DEDUP-023/026: unmapped taxonomy blocks the finding, not the run.
-  if (!policy.approvedRootCauseIds.has(finding.root_cause_id)) {
+  // Taxonomy — FR-DEDUP-023/026: unmapped taxonomy blocks the finding, not
+  // the run. Aliases canonicalize first when a compiled taxonomy is present
+  // (TAX-005); the fingerprint always uses the canonical ID
+  // (TAXONOMY-INV-001).
+  if (policy.taxonomy) {
+    const canonical = mapRootCause(policy.taxonomy, finding.root_cause_id);
+    if (canonical === null) {
+      return {
+        finding,
+        disposition: 'NEEDS_TAXONOMY_MAPPING',
+        reasons: [`root_cause_id ${finding.root_cause_id} not in approved taxonomy`],
+      };
+    }
+    finding.root_cause_id = canonical;
+    finding.taxonomy_version = policy.taxonomy.version;
+  } else if (!policy.approvedRootCauseIds.has(finding.root_cause_id)) {
     return {
       finding,
       disposition: 'NEEDS_TAXONOMY_MAPPING',

@@ -3,6 +3,7 @@ import {
   GitHubIntegrationSeveredError,
   GitHubRateLimitError,
   GitHubReadError,
+  type CheckRunUpdate,
   type GitHubAdapter,
   type PostedComment,
   type ReviewSubmission,
@@ -207,6 +208,24 @@ export class GitHubRestAdapter implements GitHubAdapter {
     });
     if (!response.ok) {
       throw new GitHubReadError(`comment PATCH failed: ${response.status}`, response.status);
+    }
+  }
+
+  /** FR-CHECK-001/002: check runs are keyed by name+head SHA; POST upserts. */
+  async upsertCheckRun(input: CheckRunUpdate): Promise<void> {
+    const body: Record<string, unknown> = {
+      name: 'ai-code-review',
+      head_sha: input.headSha,
+      status: input.status,
+      output: { title: 'AI Code Review', summary: input.summary },
+    };
+    if (input.status === 'completed') body['conclusion'] = input.conclusion ?? 'neutral';
+    const response = await this.authedFetch(`/repos/${input.repo}/check-runs`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      throw new GitHubReadError(`check-run POST failed: ${response.status}`, response.status);
     }
   }
 }

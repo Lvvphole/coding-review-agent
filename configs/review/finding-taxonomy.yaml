@@ -1,0 +1,108 @@
+# Canonical finding taxonomy — PRD v6.5 §16.3 (id="finding-taxonomy-yaml").
+# Repository extensions require a global parent_id and may never override
+# global canonical IDs (HARD-RULE-030, TAX-003/004). Production changes ship
+# through eval-gated promotion (HARD-RULE-029).
+taxonomy:
+  version: "2026-07-03"
+  global:
+    - id: AUTHZ.MISSING_AUTHORIZATION_CHECK
+      family: AUTHORIZATION
+      category: security
+      aliases:
+        - auth bypass
+        - missing auth check
+        - missing authorization
+        - ownership not verified
+    - id: INPUT.SQL_INJECTION_RISK
+      family: INPUT_VALIDATION
+      category: security
+      aliases:
+        - sql injection
+        - unparameterized query
+        - unsafe query construction
+    - id: INPUT.COMMAND_INJECTION_RISK
+      family: INPUT_VALIDATION
+      category: security
+      aliases:
+        - command injection
+        - shell injection
+        - unsafe exec
+    - id: INPUT.XSS_RISK
+      family: INPUT_VALIDATION
+      category: security
+      aliases:
+        - cross-site scripting
+        - xss
+        - unescaped output
+    - id: SECRET.HARDCODED_CREDENTIAL
+      family: SECRETS
+      category: security
+      aliases:
+        - hardcoded secret
+        - hardcoded credential
+        - committed api key
+    - id: BUG.NULL_DEREFERENCE
+      family: CORRECTNESS
+      category: bug
+      aliases:
+        - null dereference
+        - undefined access
+        - missing null check
+    - id: BUG.RACE_CONDITION
+      family: CONCURRENCY
+      category: bug
+      aliases:
+        - race condition
+        - unsynchronized access
+        - toctou
+    - id: BUG.LOGIC_ERROR
+      family: CORRECTNESS
+      category: bug
+      aliases:
+        - logic error
+        - incorrect condition
+        - off-by-one
+    - id: PERF.N_PLUS_ONE_QUERY
+      family: PERFORMANCE
+      category: performance
+      aliases:
+        - n+1 query
+        - query in loop
+    - id: PERF.UNBOUNDED_ALLOCATION
+      family: PERFORMANCE
+      category: performance
+      aliases:
+        - unbounded memory
+        - unbounded allocation
+        - memory leak
+    - id: TEST.MISSING_ASSERTION
+      family: TEST_QUALITY
+      category: test_gap
+      aliases:
+        - missing assertion
+        - weak test
+        - no validation in test
+    - id: TEST.MISSING_COVERAGE
+      family: TEST_QUALITY
+      category: test_gap
+      aliases:
+        - missing test
+        - untested path
+        - no test coverage
+    - id: MAINT.EXCESSIVE_COMPLEXITY
+      family: MAINTAINABILITY
+      category: maintainability
+      aliases:
+        - excessive complexity
+        - deeply nested
+        - god function
+    - id: ERROR.SWALLOWED_EXCEPTION
+      family: ERROR_HANDLING
+      category: bug
+      aliases:
+        - swallowed exception
+        - empty catch
+        - ignored error
+  repository_extensions:
+    enabled: true
+    rules: []
