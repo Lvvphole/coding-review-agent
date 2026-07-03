@@ -62,7 +62,14 @@ class GatewayReviewerAgent implements ReviewAgent {
 
     try {
       const response = await this.gateway.complete(request, ctx.cancellation);
-      return { agentName: this.name, taskType: this.taskType, rawOutput: response.content, ok: true };
+      return {
+        agentName: this.name,
+        taskType: this.taskType,
+        rawOutput: response.content,
+        ok: true,
+        tokenInput: response.token_input,
+        tokenOutput: response.token_output,
+      };
     } catch (err) {
       return {
         agentName: this.name,
@@ -70,6 +77,8 @@ class GatewayReviewerAgent implements ReviewAgent {
         rawOutput: '',
         ok: false,
         error: err instanceof Error ? err.message : String(err),
+        tokenInput: 0,
+        tokenOutput: 0,
       };
     }
   }

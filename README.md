@@ -4,7 +4,7 @@
 
 # Agentic AI CI Code Review Bot
 
-[![CI](https://github.com/Lvvphole/coding-review-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Lvvphole/coding-review-agent/actions/workflows/ci.yml) ![Status](https://img.shields.io/badge/status-sprint%204%20complete-blue) ![Node](https://img.shields.io/badge/node-%3E%3D22-3c873a) ![pnpm](https://img.shields.io/badge/pnpm-10.33-f69220) ![TypeScript](https://img.shields.io/badge/TypeScript-5.7%20strict-3178c6) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791) ![Redis](https://img.shields.io/badge/Redis-7-dc382d)
+[![CI](https://github.com/Lvvphole/coding-review-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Lvvphole/coding-review-agent/actions/workflows/ci.yml) ![Status](https://img.shields.io/badge/status-sprint%205%20complete-blue) ![Node](https://img.shields.io/badge/node-%3E%3D22-3c873a) ![pnpm](https://img.shields.io/badge/pnpm-10.33-f69220) ![TypeScript](https://img.shields.io/badge/TypeScript-5.7%20strict-3178c6) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791) ![Redis](https://img.shields.io/badge/Redis-7-dc382d)
 
 A production-grade pull-request review system implementing the **Agentic AI CI Code Review Bot PRD v6.5**. It is not an LLM wrapper: it is a deterministic CI workflow with controlled agentic review, durable Postgres fencing, edge webhook idempotency, distributed pending-post locking, and validated-only GitHub posting.
 
@@ -236,7 +236,8 @@ agentic-ci-review-bot/
 | 2 | Real GitHub boundary: App auth with token refresh, REST/GraphQL adapter, read-path backoff, durable run executor + posting worker, post-flight reconciliation actions, dry-run mode | **Complete** |
 | 3 | LLM Gateway service: signed policy bundles, bit-masked routing, quota leases, metadata signing, Anthropic provider, embeddings endpoint | **Complete** |
 | 4 | Context depth: Symbol Skeleton, high-risk chunking, language matrix, taxonomy compilation with alias mapping, YAML config loading, check-run reporter | **Complete** |
-| 5+ | Control Plane workers (watchdog, retention, spend ledger), telemetry/event bus, multi-tenant isolation, eval pipeline | Planned |
+| 5 | Control Plane workers: run watchdog, retention cleanup with evidence redaction, HMAC-pseudonymized spend ledger + expungable identity map, privacy expungement | **Complete** |
+| 6+ | Telemetry/event bus (ClickHouse), route compiler + policy canary, feedback ingestion, multi-tenant hardening, eval pipeline, admin dashboard | Planned |
 
 Full deferral details per sprint live in [`docs/sprints/sprint-01.md`](docs/sprints/sprint-01.md).
 

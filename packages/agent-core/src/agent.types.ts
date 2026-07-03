@@ -30,6 +30,8 @@ export interface AgentResult {
   rawOutput: string;
   ok: boolean;
   error?: string;
+  tokenInput: number;
+  tokenOutput: number;
 }
 
 export interface ReviewAgent {
