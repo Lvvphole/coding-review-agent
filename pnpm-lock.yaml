@@ -58,6 +58,18 @@ importers:
         specifier: ^8.11.0
         version: 8.20.0
 
+  apps/llm-gateway:
+    dependencies:
+      '@review-bot/llm-client':
+        specifier: workspace:*
+        version: link:../../packages/llm-client
+      '@review-bot/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      '@review-bot/validators':
+        specifier: workspace:*
+        version: link:../../packages/validators
+
   packages/agent-core:
     dependencies:
       '@review-bot/context-engine':

@@ -4,3 +4,6 @@ dist/
 .env
 .env.*
 coverage/
+policy-bundle.signed.json
+policy-signing.key.pem
+policy-signing.pub.pem
