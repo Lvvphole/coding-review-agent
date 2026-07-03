@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./docs/assets/lime-review-dashboard.png" alt="LimeReview AI code review dashboard" width="100%" />
+</p>
+
 # Agentic AI CI Code Review Bot
 
 [![CI](https://github.com/Lvvphole/coding-review-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Lvvphole/coding-review-agent/actions/workflows/ci.yml) ![Status](https://img.shields.io/badge/status-sprint%203%20complete-blue) ![Node](https://img.shields.io/badge/node-%3E%3D22-3c873a) ![pnpm](https://img.shields.io/badge/pnpm-10.33-f69220) ![TypeScript](https://img.shields.io/badge/TypeScript-5.7%20strict-3178c6) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791) ![Redis](https://img.shields.io/badge/Redis-7-dc382d)
