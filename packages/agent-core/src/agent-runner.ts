@@ -19,6 +19,8 @@ export async function runAgentsAllSettled(
       rawOutput: '',
       ok: false,
       error: s.reason instanceof Error ? s.reason.message : String(s.reason),
+      tokenInput: 0,
+      tokenOutput: 0,
     };
   });
 }

@@ -8,6 +8,8 @@ import { PrRunCoordinator } from '../concurrency/pr-run-coordinator.js';
 import { DebounceManager } from '../concurrency/debounce-manager.js';
 import { PendingPostStore } from '../outbox/pending-post-store.js';
 import { GitHubReadError, type GitHubAdapter } from '../adapters/github.adapter.js';
+import { SpendLedger } from '../ledger/spend-ledger.js';
+import { persistFindings } from '../db/findings-store.js';
 import { runReviewPipeline } from '../workflows/review-pr.workflow.js';
 import {
   postFindings,
@@ -37,6 +39,8 @@ export interface RunExecutorDeps {
   validationPolicy: ValidationPolicy;
   postingPolicy: PostingPolicy;
   dryRun: boolean;
+  /** Spend accounting (HARD-RULE-024/025); optional until the event bus sprint. */
+  ledger?: SpendLedger;
   log?: (msg: string, fields?: Record<string, unknown>) => void;
 }
 
@@ -163,6 +167,30 @@ export class RunExecutor {
         cancellation: cancellation.signal,
       });
 
+      // Spend accounting from gateway usage (FR-CP-003); accounting failures
+      // never fail the review run.
+      if (this.deps.ledger && result.tokenUsage.input + result.tokenUsage.output > 0) {
+        try {
+          await this.deps.ledger.recordUsage({
+            tenantId: run.tenantId,
+            appId: 'ci-review-bot',
+            provider: 'gateway',
+            model: 'per-route',
+            modelTier: 'standard',
+            taskType: 'code_review',
+            workflowId: 'pr_review',
+            tokenInput: result.tokenUsage.input,
+            tokenOutput: result.tokenUsage.output,
+            costUsd: 0,
+            repo: run.repo,
+            pullRequestId: run.pullRequestId,
+            runId: run.runId,
+          });
+        } catch (err) {
+          this.log('ledger.write_failed', { runId: run.runId, error: String(err) });
+        }
+      }
+
       state = transition(state, 'EVT_AGENTS_DONE').next; // AGGREGATING
       await this.setState(run, state);
       state = transition(state, 'EVT_AGGREGATION_DONE').next; // VERIFYING
@@ -177,6 +205,14 @@ export class RunExecutor {
 
       state = transition(state, 'EVT_VALIDATION_PASS').next; // READY_TO_POST
       await this.setState(run, state);
+
+      // Durable findings record (§24.2) — retention/expungement target
+      // (HARD-RULE-047); persistence failure never fails the run.
+      try {
+        await persistFindings(this.deps.pool, run, result.validated, 'VALIDATED');
+      } catch (err) {
+        this.log('ci_review.findings.persist_failed', { runId: run.runId, error: String(err) });
+      }
 
       if (this.deps.dryRun) {
         // FR-SLO-008 shadow mode: full pipeline, guard-checked, never posted.

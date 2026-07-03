@@ -131,26 +131,6 @@ export function transition(
   return { next, emitted: ['state.transition'] };
 }
 
-/**
- * Per-state watchdog deadlines in seconds — FR-RUN-001. A watchdog worker
- * compares durable review_runs.updated_at against these (FR-RUN-002/005).
- */
-export const STATE_DEADLINES_SECONDS: Record<RunState, number | null> = {
-  RECEIVED: 60,
-  DEBOUNCING: 300,
-  QUEUED: 600,
-  CONTEXT_PREPARING: 300,
-  GATEWAY_REQUESTING: 120,
-  AGENTS_RUNNING: 900,
-  AGGREGATING: 120,
-  VERIFYING: 300,
-  READY_TO_POST: 120,
-  POSTING: 300,
-  GH_RATE_LIMIT_BACKOFF: 3600,
-  COMPLETED: null,
-  CANCELLED: null,
-  STALE_DISCARDED: null,
-  FAILED: null,
-  BLOCKED: null,
-  ESCALATED: null,
-};
+// STATE_DEADLINES_SECONDS moved to @review-bot/shared (consumed by the
+// Control Plane watchdog worker as well as this app).
+export { STATE_DEADLINES_SECONDS } from '@review-bot/shared';

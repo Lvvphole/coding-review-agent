@@ -7,6 +7,7 @@
     { "path": "packages/llm-client" },
     { "path": "packages/agent-core" },
     { "path": "apps/ci-review-bot" },
-    { "path": "apps/llm-gateway" }
+    { "path": "apps/llm-gateway" },
+    { "path": "apps/control-plane" }
   ]
 }

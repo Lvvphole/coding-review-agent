@@ -34,6 +34,8 @@ export interface ReviewPipelineResult {
   /** High-risk files reviewed via chunking + Symbol Skeleton (FR-CTX-020). */
   chunkedFiles: string[];
   agentErrors: { agentName: string; error: string }[];
+  /** Total gateway token usage across agents (spend accounting input). */
+  tokenUsage: { input: number; output: number };
 }
 
 export async function runReviewPipeline(input: {
@@ -142,5 +144,9 @@ export async function runReviewPipeline(input: {
     blockedHighRiskFiles: stillBlocked,
     chunkedFiles: [...new Set(chunks.map((c) => c.filePath))],
     agentErrors,
+    tokenUsage: {
+      input: results.reduce((n, r) => n + r.tokenInput, 0),
+      output: results.reduce((n, r) => n + r.tokenOutput, 0),
+    },
   };
 }

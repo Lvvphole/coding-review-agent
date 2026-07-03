@@ -61,6 +61,19 @@ importers:
         specifier: ^8.11.0
         version: 8.20.0
 
+  apps/control-plane:
+    dependencies:
+      '@review-bot/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      pg:
+        specifier: ^8.13.0
+        version: 8.22.0
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.20.0
+
   apps/llm-gateway:
     dependencies:
       '@review-bot/llm-client':
