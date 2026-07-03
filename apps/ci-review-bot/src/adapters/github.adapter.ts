@@ -1,11 +1,10 @@
 /**
  * GitHub adapter boundary — apps/ci-review-bot/src/adapters (PRD §8).
  *
- * The real implementation (REST + GraphQL per §15.6 reconciliation
- * requirements) lands in the GitHub-integration sprint; Sprint 1 defines the
- * contract the workflows depend on plus an in-memory fake used by tests and
- * the simulator. Batched review submission is the default posting strategy
- * (FR-POST-068).
+ * Sprint 2: the contract now covers the full read/write/reconcile surface.
+ * `GitHubRestAdapter` (+ GraphQL delegate) is the production implementation;
+ * `FakeGitHubAdapter` remains the deterministic test double. Batched review
+ * submission is the default posting strategy (FR-POST-068).
  */
 
 export interface InlineCommentDraft {
@@ -25,6 +24,8 @@ export interface ReviewSubmission {
 export interface PostedComment {
   commentId: string;
   body: string;
+  /** GraphQL node id, required for minimization (FR-POST-025). */
+  nodeId?: string;
 }
 
 export class GitHubRateLimitError extends Error {
@@ -41,6 +42,14 @@ export class GitHubIntegrationSeveredError extends Error {
   }
 }
 
+/** Read-path failure after bounded retries (HARD-RULE-045, FR-GH-053). */
+export class GitHubReadError extends Error {
+  constructor(message: string, public readonly status: number | null) {
+    super(message);
+    this.name = 'GitHubReadError';
+  }
+}
+
 export interface GitHubAdapter {
   /** Submits one PR review carrying all inline comments (FR-POST-068). */
   submitReview(submission: ReviewSubmission): Promise<PostedComment>;
@@ -51,6 +60,20 @@ export interface GitHubAdapter {
   listBotComments(repo: string, pullRequestId: number): Promise<PostedComment[]>;
   /** Reads current PR head SHA for post-flight reconciliation (FR-POST-022). */
   getCurrentHeadSha(repo: string, pullRequestId: number): Promise<string>;
+  /** Fetches the unified diff for the PR head (context read path). */
+  getDiff(repo: string, pullRequestId: number): Promise<string>;
+  /**
+   * Reply count for a posted comment; null when it cannot be reliably
+   * determined → callers default to preserve-not-delete (FR-POST-034).
+   */
+  getReplyCount(repo: string, pullRequestId: number, commentId: string): Promise<number | null>;
+  /**
+   * Minimizes an orphaned comment when supported (GraphQL); returns false
+   * when minimization is unavailable (FR-POST-026).
+   */
+  minimizeComment(comment: PostedComment): Promise<boolean>;
+  /** Appends the [Outdated Code State] marker, preserving the thread (FR-POST-033). */
+  appendOutdatedMarker(repo: string, commentId: string, currentBody: string): Promise<void>;
 }
 
 /** Deterministic in-memory fake for tests and simulate-pr-review. */
@@ -58,6 +81,11 @@ export class FakeGitHubAdapter implements GitHubAdapter {
   public readonly reviews: ReviewSubmission[] = [];
   private comments = new Map<string, PostedComment[]>();
   private headShas = new Map<string, string>();
+  private diffs = new Map<string, string>();
+  private replyCounts = new Map<string, number | null>();
+  public readonly minimized: string[] = [];
+  public readonly editedBodies = new Map<string, string>();
+  public minimizeSupported = true;
   private nextId = 1;
   /** Test hooks: queue of errors to throw on next submitReview calls. */
   public failNextSubmitWith: Error[] = [];
@@ -68,11 +96,20 @@ export class FakeGitHubAdapter implements GitHubAdapter {
     this.headShas.set(`${repo}#${prId}`, sha);
   }
 
+  setDiff(repo: string, prId: number, diff: string): void {
+    this.diffs.set(`${repo}#${prId}`, diff);
+  }
+
+  setReplyCount(commentId: string, count: number | null): void {
+    this.replyCounts.set(commentId, count);
+  }
+
   async submitReview(submission: ReviewSubmission): Promise<PostedComment> {
     const queued = this.failNextSubmitWith.shift();
     if (queued) throw queued;
     const key = `${submission.repo}#${submission.pullRequestId}`;
-    const posted: PostedComment = { commentId: `c${this.nextId++}`, body: submission.body };
+    const id = `c${this.nextId++}`;
+    const posted: PostedComment = { commentId: id, body: submission.body, nodeId: id };
     this.reviews.push(submission);
     this.comments.set(key, [...(this.comments.get(key) ?? []), posted]);
     if (this.crashAfterSubmit) {
@@ -88,5 +125,25 @@ export class FakeGitHubAdapter implements GitHubAdapter {
 
   async getCurrentHeadSha(repo: string, pullRequestId: number): Promise<string> {
     return this.headShas.get(`${repo}#${pullRequestId}`) ?? '';
+  }
+
+  async getDiff(repo: string, pullRequestId: number): Promise<string> {
+    const diff = this.diffs.get(`${repo}#${pullRequestId}`);
+    if (diff === undefined) throw new GitHubReadError('no diff configured', 404);
+    return diff;
+  }
+
+  async getReplyCount(_repo: string, _prId: number, commentId: string): Promise<number | null> {
+    return this.replyCounts.has(commentId) ? (this.replyCounts.get(commentId) as number | null) : 0;
+  }
+
+  async minimizeComment(comment: PostedComment): Promise<boolean> {
+    if (!this.minimizeSupported) return false;
+    this.minimized.push(comment.commentId);
+    return true;
+  }
+
+  async appendOutdatedMarker(_repo: string, commentId: string, currentBody: string): Promise<void> {
+    this.editedBodies.set(commentId, `${currentBody}\n\n> [Outdated Code State]`);
   }
 }

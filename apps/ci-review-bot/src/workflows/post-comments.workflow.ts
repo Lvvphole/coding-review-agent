@@ -216,6 +216,37 @@ export async function executePost(
   }
 }
 
+export type ReconcileAction = 'deleted_or_minimized' | 'preserved_marked' | 'preserved_unknown';
+
+/**
+ * Post-flight stale comment reconciliation — HARD-RULE-018/019,
+ * FR-POST-024/025/031..035 (tests RACE-002/003/004).
+ *
+ * Automation may correct its own stale output; it may never destroy human
+ * discussion: delete/minimize only when reply_count == 0, mark
+ * [Outdated Code State] when replies exist, preserve when unknown.
+ */
+export async function reconcileOrphanedComment(
+  run: RunIdentity,
+  comment: { commentId: string; body: string; nodeId?: string },
+  github: Pick<GitHubAdapter, 'getReplyCount' | 'minimizeComment' | 'appendOutdatedMarker'>,
+): Promise<ReconcileAction> {
+  const replyCount = await github.getReplyCount(run.repo, run.pullRequestId, comment.commentId);
+  if (replyCount === null) {
+    // FR-POST-034: cannot determine → preserve-not-delete.
+    return 'preserved_unknown';
+  }
+  if (replyCount > 0) {
+    // FR-POST-032/033: never delete; mark and preserve the thread.
+    await github.appendOutdatedMarker(run.repo, comment.commentId, comment.body);
+    return 'preserved_marked';
+  }
+  const minimized = await github.minimizeComment(comment);
+  if (minimized) return 'deleted_or_minimized';
+  // FR-POST-026: minimization unavailable → no further comments for the run.
+  return 'preserved_unknown';
+}
+
 async function readDurable(
   run: RunIdentity,
   deps: PostDependencies,

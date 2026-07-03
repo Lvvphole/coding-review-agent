@@ -1,6 +1,6 @@
 # Agentic AI CI Code Review Bot
 
-![Status](https://img.shields.io/badge/status-sprint%201%20complete-blue) ![Tests](https://img.shields.io/badge/tests-81%20passing-brightgreen) ![Node](https://img.shields.io/badge/node-%3E%3D22-3c873a) ![pnpm](https://img.shields.io/badge/pnpm-10.33-f69220) ![TypeScript](https://img.shields.io/badge/TypeScript-5.7%20strict-3178c6) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791) ![Redis](https://img.shields.io/badge/Redis-7-dc382d)
+![Status](https://img.shields.io/badge/status-sprint%202%20complete-blue) ![Tests](https://img.shields.io/badge/tests-100%20passing-brightgreen) ![Node](https://img.shields.io/badge/node-%3E%3D22-3c873a) ![pnpm](https://img.shields.io/badge/pnpm-10.33-f69220) ![TypeScript](https://img.shields.io/badge/TypeScript-5.7%20strict-3178c6) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791) ![Redis](https://img.shields.io/badge/Redis-7-dc382d)
 
 A production-grade pull-request review system implementing the **Agentic AI CI Code Review Bot PRD v6.5**. It is not an LLM wrapper: it is a deterministic CI workflow with controlled agentic review, durable Postgres fencing, edge webhook idempotency, distributed pending-post locking, and validated-only GitHub posting.
 
@@ -228,10 +228,10 @@ agentic-ci-review-bot/
 
 | Sprint | Scope | Status |
 |---|---|---|
-| 1 | Core review path skeleton: webhook → fencing → context → agents (stub Gateway) → validators → posting with marker idempotency; docker-compose infra; 81 tests | **Complete** |
-| 2 | GitHub adapter (REST + GraphQL): token refresh, read-path backoff, posting worker loop, post-flight reconciliation actions, check-run reporter | Planned |
+| 1 | Core review path skeleton: webhook → fencing → context → agents (stub Gateway) → validators → posting with marker idempotency; docker-compose infra | **Complete** |
+| 2 | Real GitHub boundary: App auth with token refresh, REST/GraphQL adapter, read-path backoff, durable run executor + posting worker, post-flight reconciliation actions, dry-run mode | **Complete** |
 | 3 | LLM Gateway service: signed metadata, routing, quota leases, providers, embeddings endpoint | Planned |
-| 4 | Context depth: Symbol Skeleton, AST chunking, language matrix, taxonomy compilation | Planned |
+| 4 | Context depth: Symbol Skeleton, AST chunking, language matrix, taxonomy compilation, YAML config loading, check-run reporter | Planned |
 | 5+ | Control Plane workers (watchdog, retention, spend ledger), telemetry/event bus, multi-tenant isolation, eval pipeline | Planned |
 
 Full deferral details per sprint live in [`docs/sprints/sprint-01.md`](docs/sprints/sprint-01.md).
