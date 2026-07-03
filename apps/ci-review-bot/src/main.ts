@@ -1,5 +1,11 @@
 import { createServer } from 'node:http';
+import { hostname } from 'node:os';
 import { Redis } from 'ioredis';
+import { StubGatewayClient } from '@review-bot/llm-client';
+import {
+  createDiffReviewerAgent,
+  createSecurityReviewerAgent,
+} from '@review-bot/agent-core';
 import { loadConfig } from './config.js';
 import { createPool } from './db/pool.js';
 import { migrate } from './db/migrate.js';
@@ -7,14 +13,21 @@ import { WebhookDeliveryStore } from './handlers/webhook-delivery-store.js';
 import { WebhookHandler, type TenantResolver } from './handlers/webhook.handler.js';
 import { PrRunCoordinator } from './concurrency/pr-run-coordinator.js';
 import { DebounceManager } from './concurrency/debounce-manager.js';
+import { PendingPostStore } from './outbox/pending-post-store.js';
+import { GitHubAppAuth, InstallationStore, StaticTokenProvider } from './adapters/github-app-auth.js';
+import { GitHubRestAdapter } from './adapters/github-rest.adapter.js';
+import { GitHubGraphQLAdapter } from './adapters/github-graphql.adapter.js';
+import { RunExecutor } from './workers/run-executor.js';
+import { PostingWorker } from './workers/posting-worker.js';
 
 /**
  * ci-review-bot entrypoint — standing webhook-driven service (FR-EXEC-001).
  *
- * Sprint 1 wires: webhook ingestion → durable idempotency → run coordination
- * with durable fencing. The full review execution loop (queue consumer,
- * Gateway, posting worker) is exercised through tests and the
- * simulate-pr-review script until the Gateway sprint lands.
+ * Sprint 2 wiring: webhook ingestion → durable idempotency → debounce →
+ * RunExecutor (durable QUEUED runs, FR-EXEC-002/006) → GitHub REST/GraphQL
+ * adapter with App-token refresh (HARD-RULE-040) → PostingWorker draining the
+ * durable outbox. The LLM Gateway remains a stub until the Gateway sprint;
+ * set DRY_RUN=true for shadow-mode onboarding (FR-SLO-008).
  */
 
 /** Env-var tenant mapping stub; replaced by tenants table lookup. */
@@ -36,10 +49,85 @@ async function main(): Promise<void> {
   const redis = new Redis(config.redisUrl);
   const deliveries = new WebhookDeliveryStore(pool);
   const coordinator = new PrRunCoordinator(pool);
+  const pendingPosts = new PendingPostStore(pool);
+  const installations = new InstallationStore(pool);
   const debounce = new DebounceManager(redis, {
     debounceSeconds: config.review.debounceSeconds,
     maxDebounceSeconds: config.review.maxDebounceSeconds,
   });
+
+  const tokens = config.github.privateKeyPem
+    ? new GitHubAppAuth({
+        appId: config.github.appId,
+        privateKeyPem: config.github.privateKeyPem,
+        installationId: config.github.installationId,
+        tenantId: process.env['TENANT_ID'] ?? 'tenant_default',
+        org: config.github.org,
+        apiBaseUrl: config.github.apiBaseUrl,
+        store: installations,
+        refreshBeforeExpirySeconds: config.github.refreshBeforeExpirySeconds,
+        maxRefreshRetries: config.github.maxRefreshRetries,
+      })
+    : new StaticTokenProvider('unconfigured'); // dry-run/local only
+  const graphql = new GitHubGraphQLAdapter({ apiBaseUrl: config.github.apiBaseUrl, tokens });
+  const github = new GitHubRestAdapter({
+    apiBaseUrl: config.github.apiBaseUrl,
+    tokens,
+    botLogin: config.botLogin,
+    readMaxRetries: config.github.readMaxRetries,
+    graphql,
+  });
+
+  // Gateway stub until the LLM Gateway sprint (HARD-RULE-003/004: the seam is
+  // already Gateway-only; no provider keys exist in this process).
+  const gateway = new StubGatewayClient();
+  const tenantSecret = process.env['TENANT_HMAC_SECRET'] ?? 'dev-tenant-secret';
+  const postingPolicy = {
+    maxInlineComments: config.review.maxInlineComments,
+    pendingPostExpireAfterHours: config.pendingPosts.expireAfterHours,
+    tenantSecret,
+    integrationStatus: 'ACTIVE',
+  };
+
+  const executor = new RunExecutor({
+    pool,
+    coordinator,
+    debounce,
+    pendingPosts,
+    github,
+    agents: [createDiffReviewerAgent(gateway), createSecurityReviewerAgent(gateway)],
+    contextPolicy: {
+      maxFiles: config.context.maxFiles,
+      maxChangedLines: config.context.maxChangedLines,
+      maxFileBytes: config.context.maxFileBytes,
+      ignoreLockfiles: config.context.ignoreLockfilesByDefault,
+      ignoreGeneratedFiles: config.context.ignoreGeneratedFiles,
+      ignoreMinifiedFiles: config.context.ignoreMinifiedFiles,
+      ignoreBinaryFiles: config.context.ignoreBinaryFiles,
+    },
+    highRisk: { categories: {} }, // loaded from configs/review/high-risk-paths.yaml in config sprint
+    validationPolicy: {
+      confidenceThreshold: config.review.confidenceThreshold,
+      highSeverityConfidenceThreshold: config.review.highSeverityConfidenceThreshold,
+      requireDeterministicEvidenceForHighSeverity:
+        config.review.requireDeterministicEvidenceForHighSeverity,
+      approvedRootCauseIds: new Set<string>(), // taxonomy compilation sprint
+    },
+    postingPolicy,
+    dryRun: config.review.dryRun,
+  });
+
+  const postingWorker = new PostingWorker({
+    pendingPosts,
+    coordinator,
+    github,
+    postingPolicy,
+    workerId: `${hostname()}:${process.pid}`,
+    maxRetries: config.pendingPosts.maxRetries,
+    lockTtlSeconds: config.pendingPosts.lockTtlSeconds,
+  });
+  await postingWorker.recoverOnStartup(); // FR-POST-039
+
   const handler = new WebhookHandler(new EnvTenantResolver(), deliveries, redis, {
     idempotencyTtlHours: config.webhookIdempotency.ttlHours,
     skipDraftPrs: config.review.skipDraftPrsByDefault,
@@ -76,34 +164,25 @@ async function main(): Promise<void> {
 
     const event = outcome.event;
     if (event.action === 'closed') {
-      // FR-GH-009/045..047 cascade is handled by the run lifecycle worker; the
-      // webhook path only acknowledges here in Sprint 1.
-      res.writeHead(202).end(JSON.stringify({ status: 'accepted', action: 'cancel_run' }));
+      await executor.handleClosedPr(event.tenantId, event.repo, event.pullRequestId);
+      res.writeHead(202).end(JSON.stringify({ status: 'accepted', action: 'cancelled' }));
       return;
     }
 
-    const deadline = await debounce.recordEvent(
-      event.tenantId,
-      event.repo,
-      event.pullRequestId,
-      event.headSha,
-    );
-    // Debounce settlement + run start: the scheduler loop polls settle() and
-    // then calls coordinator.startRun; wired minimally here for the slice.
-    setTimeout(async () => {
-      const settledSha = await debounce.settle(event.tenantId, event.repo, event.pullRequestId);
-      if (settledSha) {
-        await coordinator.startRun({
-          tenantId: event.tenantId,
-          repo: event.repo,
-          pullRequestId: event.pullRequestId,
-          headSha: settledSha,
-        });
-      }
-    }, Math.max(0, deadline - Date.now())).unref();
-
+    await debounce.recordEvent(event.tenantId, event.repo, event.pullRequestId, event.headSha);
     res.writeHead(202).end(JSON.stringify({ status: 'accepted' }));
   });
+
+  // Scheduler loops: durable work survives restarts (FR-EXEC-006); ticks are
+  // cheap no-ops when idle.
+  const executorLoop = setInterval(() => {
+    executor.tick().catch((err) => console.error('executor tick failed', err));
+  }, 2_000);
+  executorLoop.unref();
+  const postingLoop = setInterval(() => {
+    postingWorker.tick().catch((err) => console.error('posting tick failed', err));
+  }, 5_000);
+  postingLoop.unref();
 
   const port = Number(process.env['PORT'] ?? 8080);
   server.listen(port, () => console.log(`ci-review-bot listening on :${port}`));

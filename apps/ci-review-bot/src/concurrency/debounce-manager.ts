@@ -17,6 +17,12 @@ export class DebounceManager {
     return `tenant:${tenantId}:pr:debounce:${repo}:${prId}`;
   }
 
+  private static readonly DUE_SET = 'pr:debounce:due';
+
+  private static member(tenantId: string, repo: string, prId: number): string {
+    return `${tenantId}|${repo}|${prId}`;
+  }
+
   /**
    * Records an event; returns the deadline (epoch ms) when the debounce
    * window settles. Callers schedule evaluation at that deadline and then
@@ -36,7 +42,33 @@ export class DebounceManager {
       deadline: String(deadline),
     });
     await this.redis.pexpire(key, this.policy.maxDebounceSeconds * 1000 + 60_000);
+    // Schedule for the executor's due-window scan (FR-EXEC-003: Redis is
+    // acceptable for debounce scheduling; runs become durable at startRun).
+    await this.redis.zadd(
+      DebounceManager.DUE_SET,
+      deadline,
+      DebounceManager.member(tenantId, repo, prId),
+    );
     return deadline;
+  }
+
+  /** Returns debounce windows whose deadline has passed (executor scan). */
+  async dueWindows(
+    nowMs = Date.now(),
+    limit = 50,
+  ): Promise<{ tenantId: string; repo: string; prId: number }[]> {
+    const members = await this.redis.zrangebyscore(
+      DebounceManager.DUE_SET,
+      '-inf',
+      nowMs,
+      'LIMIT',
+      0,
+      limit,
+    );
+    return members.map((m) => {
+      const [tenantId, repo, prId] = m.split('|') as [string, string, string];
+      return { tenantId, repo, prId: Number(prId) };
+    });
   }
 
   /**
@@ -46,9 +78,13 @@ export class DebounceManager {
   async settle(tenantId: string, repo: string, prId: number): Promise<string | null> {
     const key = this.key(tenantId, repo, prId);
     const state = await this.redis.hgetall(key);
-    if (!state['head_sha'] || !state['deadline']) return null;
+    if (!state['head_sha'] || !state['deadline']) {
+      await this.redis.zrem(DebounceManager.DUE_SET, DebounceManager.member(tenantId, repo, prId));
+      return null;
+    }
     if (Date.now() < Number(state['deadline'])) return null;
     await this.redis.del(key);
+    await this.redis.zrem(DebounceManager.DUE_SET, DebounceManager.member(tenantId, repo, prId));
     return state['head_sha'];
   }
 }
