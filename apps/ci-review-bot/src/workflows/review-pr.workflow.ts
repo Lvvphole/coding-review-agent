@@ -2,8 +2,10 @@ import type { ReviewFinding, RunIdentity } from '@review-bot/shared';
 import {
   buildContextPlan,
   buildDiffLineIndex,
+  chunkHighRiskFile,
   parseUnifiedDiff,
   type ContextPolicy,
+  type FileChunk,
   type HighRiskConfig,
 } from '@review-bot/context-engine';
 import {
@@ -29,6 +31,8 @@ export interface ReviewPipelineResult {
   needsTaxonomyMapping: ReviewFinding[];
   skippedFiles: { path: string; reason: string }[];
   blockedHighRiskFiles: string[];
+  /** High-risk files reviewed via chunking + Symbol Skeleton (FR-CTX-020). */
+  chunkedFiles: string[];
   agentErrors: { agentName: string; error: string }[];
 }
 
@@ -52,7 +56,26 @@ export async function runReviewPipeline(input: {
     planInput.reviewIgnoreContent = input.reviewIgnoreContent;
   }
   const plan = buildContextPlan(files, planInput);
-  const includedPaths = new Set(plan.included.map((d) => d.file.path));
+
+  // High-risk oversized files are chunked, never silently skipped
+  // (HARD-RULE-020, FR-CTX-015): each chunk carries the whole-file Symbol
+  // Skeleton as dynamic context. Files whose chunking yields nothing are
+  // reported blocked (FR-CTX-021/022).
+  const chunks: FileChunk[] = [];
+  const stillBlocked: string[] = [];
+  for (const decision of plan.blockedHighRisk) {
+    const fileChunks = chunkHighRiskFile(decision.file, {
+      policy: { maxChunkLines: input.contextPolicy.maxChunkLines ?? 200 },
+      reason: decision.highRiskCategory ?? 'high_risk',
+    });
+    if (fileChunks.length > 0) chunks.push(...fileChunks);
+    else stillBlocked.push(decision.file.path);
+  }
+
+  const includedPaths = new Set([
+    ...plan.included.map((d) => d.file.path),
+    ...chunks.map((c) => c.filePath),
+  ]);
   const diffIndexAll = buildDiffLineIndex(files.filter((f) => includedPaths.has(f.path)));
 
   // Agents run with all-settled isolation (FR-AGENT-011/012).
@@ -60,6 +83,7 @@ export async function runReviewPipeline(input: {
     run: input.run,
     files: plan.included,
     diffText: input.diffText,
+    chunks,
     stablePrefix: STABLE_REVIEW_PREFIX,
     cancellation: input.cancellation,
   });
@@ -115,7 +139,8 @@ export async function runReviewPipeline(input: {
     rejected,
     needsTaxonomyMapping,
     skippedFiles: plan.skipped.map((d) => ({ path: d.file.path, reason: d.skipReason ?? 'unknown' })),
-    blockedHighRiskFiles: plan.blockedHighRisk.map((d) => d.file.path),
+    blockedHighRiskFiles: stillBlocked,
+    chunkedFiles: [...new Set(chunks.map((c) => c.filePath))],
     agentErrors,
   };
 }

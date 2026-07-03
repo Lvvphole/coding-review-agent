@@ -1,7 +1,11 @@
 import { createServer } from 'node:http';
 import { hostname } from 'node:os';
 import { Redis } from 'ioredis';
-import { StubGatewayClient } from '@review-bot/llm-client';
+import {
+  HttpGatewayClient,
+  StubGatewayClient,
+  type GatewayClient,
+} from '@review-bot/llm-client';
 import {
   createDiffReviewerAgent,
   createSecurityReviewerAgent,
@@ -19,6 +23,7 @@ import { GitHubRestAdapter } from './adapters/github-rest.adapter.js';
 import { GitHubGraphQLAdapter } from './adapters/github-graphql.adapter.js';
 import { RunExecutor } from './workers/run-executor.js';
 import { PostingWorker } from './workers/posting-worker.js';
+import { loadHighRiskConfig, loadTaxonomy } from './config-files.js';
 
 /**
  * ci-review-bot entrypoint — standing webhook-driven service (FR-EXEC-001).
@@ -78,9 +83,21 @@ async function main(): Promise<void> {
     graphql,
   });
 
-  // Gateway stub until the LLM Gateway sprint (HARD-RULE-003/004: the seam is
-  // already Gateway-only; no provider keys exist in this process).
-  const gateway = new StubGatewayClient();
+  // Gateway-only LLM access (HARD-RULE-003/004): the real Gateway when
+  // GATEWAY_URL is configured, deterministic stub otherwise. No provider
+  // keys exist in this process either way (HARD-RULE-005).
+  const gatewayUrl = process.env['GATEWAY_URL'];
+  const gateway: GatewayClient = gatewayUrl
+    ? new HttpGatewayClient({
+        gatewayUrl,
+        appSecret: process.env['APP_METADATA_SECRET'] ?? 'dev-app-secret',
+      })
+    : new StubGatewayClient();
+
+  // YAML-config-driven review policy (§9): high-risk paths + compiled taxonomy.
+  const configRoot = process.env['CONFIG_ROOT'] ?? 'configs';
+  const highRisk = loadHighRiskConfig(configRoot);
+  const taxonomy = loadTaxonomy(configRoot);
   const tenantSecret = process.env['TENANT_HMAC_SECRET'] ?? 'dev-tenant-secret';
   const postingPolicy = {
     maxInlineComments: config.review.maxInlineComments,
@@ -105,13 +122,14 @@ async function main(): Promise<void> {
       ignoreMinifiedFiles: config.context.ignoreMinifiedFiles,
       ignoreBinaryFiles: config.context.ignoreBinaryFiles,
     },
-    highRisk: { categories: {} }, // loaded from configs/review/high-risk-paths.yaml in config sprint
+    highRisk,
     validationPolicy: {
       confidenceThreshold: config.review.confidenceThreshold,
       highSeverityConfidenceThreshold: config.review.highSeverityConfidenceThreshold,
       requireDeterministicEvidenceForHighSeverity:
         config.review.requireDeterministicEvidenceForHighSeverity,
-      approvedRootCauseIds: new Set<string>(), // taxonomy compilation sprint
+      approvedRootCauseIds: taxonomy.approvedIds,
+      taxonomy,
     },
     postingPolicy,
     dryRun: config.review.dryRun,

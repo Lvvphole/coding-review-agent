@@ -109,10 +109,32 @@ export class RunExecutor {
     await this.deps.coordinator.updateRunStatus(run.runId, state);
   }
 
+  /** FR-CHECK-005: check-run reporting must never fail or bypass the run. */
+  private async reportCheck(
+    run: RunIdentity,
+    status: 'queued' | 'in_progress' | 'completed',
+    summary: string,
+    conclusion?: 'success' | 'failure' | 'neutral' | 'cancelled',
+  ): Promise<void> {
+    try {
+      const update: Parameters<GitHubAdapter['upsertCheckRun']>[0] = {
+        repo: run.repo,
+        headSha: run.headSha,
+        status,
+        summary,
+      };
+      if (conclusion !== undefined) update.conclusion = conclusion;
+      await this.deps.github.upsertCheckRun(update);
+    } catch (err) {
+      this.log('ci_review.check_run.report_failed', { runId: run.runId, error: String(err) });
+    }
+  }
+
   private async executeRun(run: RunIdentity): Promise<void> {
     try {
       let state = transition('QUEUED', 'EVT_RUN_DEQUEUED').next; // CONTEXT_PREPARING
       await this.setState(run, state);
+      await this.reportCheck(run, 'in_progress', 'AI review in progress');
 
       let diffText: string;
       try {
@@ -148,6 +170,7 @@ export class RunExecutor {
 
       if (result.validated.length === 0) {
         await this.setState(run, transition(state, 'EVT_VALIDATION_FAIL').next); // COMPLETED
+        await this.reportCheck(run, 'completed', 'AI review found no reportable issues', 'success');
         this.log('ci_review.run.completed', { runId: run.runId, findings: 0 });
         return;
       }
@@ -202,9 +225,17 @@ export class RunExecutor {
           await this.setState(run, 'BLOCKED');
           break;
       }
+      // AI review never blocks merge by default (§23.3 CI rule): conclusion
+      // is neutral/success, not failure, regardless of findings.
+      const summary =
+        outcome.kind === 'posted' || outcome.kind === 'already_posted'
+          ? `AI review posted ${result.validated.length} finding(s)`
+          : `AI review finished: ${outcome.kind}`;
+      await this.reportCheck(run, 'completed', summary, 'neutral');
       this.log('ci_review.run.finished', { runId: run.runId, outcome: outcome.kind });
     } catch (err) {
       await this.setState(run, 'FAILED');
+      await this.reportCheck(run, 'completed', 'AI review failed internally', 'neutral');
       this.log('ci_review.run.failed', { runId: run.runId, error: String(err) });
     }
   }

@@ -1,5 +1,5 @@
 import type { RunIdentity } from '@review-bot/shared';
-import type { FileDecision } from '@review-bot/context-engine';
+import type { FileChunk, FileDecision } from '@review-bot/context-engine';
 
 /**
  * Agent contract — FR-AGENT-007..012.
@@ -13,6 +13,11 @@ export interface AgentContext {
   files: FileDecision[];
   /** Raw unified diff limited to selected files. */
   diffText: string;
+  /**
+   * High-risk oversized file chunks with per-file Symbol Skeletons —
+   * dynamic context only, never part of the stable prefix (HARD-RULE-021).
+   */
+  chunks: FileChunk[];
   /** Stable global prompt prefix — FR-CTX-013/030; reusable across PRs. */
   stablePrefix: string;
   cancellation: AbortSignal;

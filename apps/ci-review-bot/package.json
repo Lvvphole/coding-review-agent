@@ -9,13 +9,14 @@
     "start": "node dist/main.js"
   },
   "dependencies": {
-    "@review-bot/shared": "workspace:*",
-    "@review-bot/context-engine": "workspace:*",
-    "@review-bot/validators": "workspace:*",
     "@review-bot/agent-core": "workspace:*",
+    "@review-bot/context-engine": "workspace:*",
     "@review-bot/llm-client": "workspace:*",
+    "@review-bot/shared": "workspace:*",
+    "@review-bot/validators": "workspace:*",
     "ioredis": "^5.4.0",
-    "pg": "^8.13.0"
+    "pg": "^8.13.0",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/pg": "^8.11.0"

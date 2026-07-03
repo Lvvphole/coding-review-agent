@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { GatewayClient, GatewayRequest } from '@review-bot/llm-client';
+import { renderChunkPreamble } from '@review-bot/context-engine';
 import type { AgentContext, AgentResult, ReviewAgent } from './agent.types.js';
 
 /**
@@ -30,6 +31,9 @@ class GatewayReviewerAgent implements ReviewAgent {
       '',
       'diff:',
       ctx.diffText,
+      // Chunked high-risk files with Symbol Skeletons — dynamic per-file
+      // preamble per prompt layout (id="prompt-layout-v65").
+      ...ctx.chunks.map((chunk) => `\n${renderChunkPreamble(chunk)}`),
     ].join('\n');
 
     const request: GatewayRequest = {

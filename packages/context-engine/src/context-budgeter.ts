@@ -23,6 +23,8 @@ export interface ContextPolicy {
   maxFiles: number;
   maxChangedLines: number;
   maxFileBytes: number;
+  /** Bounded line window for high-risk chunking (FR-CTX-018). */
+  maxChunkLines?: number;
   ignoreLockfiles: boolean;
   ignoreGeneratedFiles: boolean;
   ignoreMinifiedFiles: boolean;
