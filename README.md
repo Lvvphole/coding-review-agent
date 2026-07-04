@@ -2,26 +2,63 @@
   <img src="./docs/assets/lime-review-dashboard.png" alt="LimeReview AI code review dashboard" width="100%" />
 </p>
 
-# Agentic AI CI Code Review Bot
+# LimeReview — Agentic AI CI Code Review Bot
 
 [![CI](https://github.com/Lvvphole/coding-review-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Lvvphole/coding-review-agent/actions/workflows/ci.yml) ![Status](https://img.shields.io/badge/status-sprint%205%20complete-blue) ![Node](https://img.shields.io/badge/node-%3E%3D22-3c873a) ![pnpm](https://img.shields.io/badge/pnpm-10.33-f69220) ![TypeScript](https://img.shields.io/badge/TypeScript-5.7%20strict-3178c6) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791) ![Redis](https://img.shields.io/badge/Redis-7-dc382d)
 
-A production-grade pull-request review system implementing the **Agentic AI CI Code Review Bot PRD v6.5**. It is not an LLM wrapper: it is a deterministic CI workflow with controlled agentic review, durable Postgres fencing, edge webhook idempotency, distributed pending-post locking, and validated-only GitHub posting.
+**LimeReview** is a GitHub-native agentic code review app implementing the **Agentic AI CI Code Review Bot PRD v6.5**. It is not an LLM wrapper: it is a deterministic CI workflow with controlled agentic review, durable Postgres fencing, edge webhook idempotency, distributed pending-post locking, and validated-only GitHub posting.
 
 > Agents may generate findings. Agents may not post findings. No finding posts without schema, evidence, line-mapping, confidence, and taxonomy validation — plus a latest-SHA + run-epoch guard checked against a durable authority.
 
 ## Overview
 
-When a pull request is opened or updated, the bot verifies and deduplicates the webhook at the edge, coalesces rapid pushes, and runs specialized reviewer agents (diff correctness, security) against a deterministically filtered diff context. Every candidate finding is validated after the LLM, deduplicated deterministically, redacted for secrets, and posted as a single batched GitHub review — but only if the PR head SHA and run epoch still match the durable fencing state at post time. Stale runs are discarded, never posted.
+When a pull request is opened or updated, LimeReview verifies and deduplicates the webhook at the edge, coalesces rapid pushes, and runs specialized reviewer agents (diff correctness, security) against a deterministically filtered diff context. Every candidate finding is validated after the LLM, deduplicated deterministically, redacted for secrets, and posted as a single batched GitHub review — but only if the PR head SHA and run epoch still match the durable fencing state at post time. Stale runs are discarded, never posted.
+
+## Use LimeReview on a Repo
+
+LimeReview is designed to be used as a GitHub-native review app.
+
+For the standard managed experience, you do not clone this repository, deploy infrastructure, or configure webhooks manually.
+
+You use it like this:
+
+1. Install the LimeReview GitHub App.
+2. Select the repository.
+3. Add or link your PRD.
+4. Choose a review mode: Light, Standard, or Strict.
+5. Have your coding agent open a pull request.
+6. LimeReview reviews the PR automatically inside GitHub.
+
+The infrastructure described later in this README is for local development and self-hosted enterprise deployment.
+
+See the product docs for detail: [UX onboarding](docs/product/ux-onboarding.md) · [review modes](docs/product/review-modes.md) · [PRD ingestion](docs/product/prd-ingestion.md) · [failure UX](docs/product/failure-ux.md).
+
+## Product Modes
+
+### Managed SaaS / Plugin Mode
+
+Best for vibe coders, solo builders, small teams, and coding-agent workflows.
+
+The setup is GitHub App install, repo selection, PRD attachment, and review mode selection.
+
+*This is the intended, default product experience.* No cloning, infrastructure, secrets, or webhook wiring is required for standard use ([HARD-RULE-UX-001/002](docs/product/ux-onboarding.md#ux-hard-rules)).
+
+### Self-Hosted Enterprise Mode
+
+Best for regulated teams, private environments, custom model routing, or internal compliance.
+
+This mode requires deploying the LimeReview service, Postgres, Redis, LLM Gateway, and GitHub App webhook infrastructure. See [Local Development & Self-Hosted Deployment](#local-development--self-hosted-deployment).
 
 ## Table of Contents
 
+- [Use LimeReview on a Repo](#use-limereview-on-a-repo)
+- [Product Modes](#product-modes)
 - [Why It Exists](#why-it-exists)
 - [Key Features](#key-features)
 - [How It Works](#how-it-works)
 - [Architecture](#architecture)
 - [Tech Stack](#tech-stack)
-- [Getting Started](#getting-started)
+- [Local Development & Self-Hosted Deployment](#local-development--self-hosted-deployment)
 - [Configuration](#configuration)
 - [Command Reference](#command-reference)
 - [Testing](#testing)
@@ -125,7 +162,11 @@ Postgres is the single correctness authority: run fencing, webhook deliveries, t
 | Local infra | Docker Compose | `infra/docker-compose.yml` |
 | LLM access | LLM Gateway service (`apps/llm-gateway`) | Signed policy, quota leases, provider dispatch; no provider keys in the bot |
 
-## Getting Started
+## Local Development & Self-Hosted Deployment
+
+> **Not the default product path.** Standard users install the LimeReview GitHub App and never touch anything below — see [Use LimeReview on a Repo](#use-limereview-on-a-repo). The steps here are for **local development** and **Self-Hosted Enterprise Mode** only.
+
+For local development or self-hosted deployment, clone the repo and run local infra.
 
 **Prerequisites:** Node ≥ 22, pnpm ≥ 10, Docker.
 
@@ -147,6 +188,8 @@ GITHUB_WEBHOOK_SECRET=dev-secret TENANT_ID=tenant_local pnpm --filter @review-bo
 ```
 
 ## Configuration
+
+> Repo-level configuration files are **optional advanced controls, not required setup for first use** (HARD-RULE-UX-003). In Managed SaaS / Plugin Mode, review behavior is set by the review mode you pick; the files below are for local development and self-hosted deployments.
 
 | Source | Purpose |
 |---|---|
@@ -242,6 +285,15 @@ agentic-ci-review-bot/
 Full deferral details per sprint live in [`docs/sprints/sprint-01.md`](docs/sprints/sprint-01.md).
 
 ## Docs
+
+**Product (managed user experience):**
+
+- [`docs/product/ux-onboarding.md`](docs/product/ux-onboarding.md) — the simple install → select → PRD → mode → PR → review flow, plus the UX hard rules
+- [`docs/product/review-modes.md`](docs/product/review-modes.md) — Light / Standard / Strict
+- [`docs/product/prd-ingestion.md`](docs/product/prd-ingestion.md) — upload, paste, select, or link a PRD
+- [`docs/product/failure-ux.md`](docs/product/failure-ux.md) — plain-language failure states
+
+**Engineering (platform internals):**
 
 - [`docs/sprints/sprint-01.md`](docs/sprints/sprint-01.md) — delivered scope, PRD anchors, deferrals
 - [`docs/prd-evaluation-v6.4.3.md`](docs/prd-evaluation-v6.4.3.md) — architecture evaluation that produced PRD v6.5
