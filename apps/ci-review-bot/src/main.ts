@@ -17,6 +17,7 @@ import { WebhookDeliveryStore } from './handlers/webhook-delivery-store.js';
 import { WebhookHandler } from './handlers/webhook.handler.js';
 import { InstallationHandler } from './handlers/installation.handler.js';
 import { TenantStore } from './tenancy/tenant-store.js';
+import { ModeStore } from './review-modes/mode-store.js';
 import { PrRunCoordinator } from './concurrency/pr-run-coordinator.js';
 import { DebounceManager } from './concurrency/debounce-manager.js';
 import { PendingPostStore } from './outbox/pending-post-store.js';
@@ -124,6 +125,9 @@ async function main(): Promise<void> {
     },
     postingPolicy,
     dryRun: config.review.dryRun,
+    // Per-repo review mode (Light/Standard/Strict) presets over the controls
+    // above; the safety floor is identical across modes (§10, HARD-RULE-UX-002).
+    modeResolver: new ModeStore(pool),
   });
 
   const postingWorker = new PostingWorker({
