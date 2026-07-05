@@ -67,3 +67,7 @@ Try again later or run deterministic checks only.
 - Every public message answers three questions: **what happened**, **what LimeReview did safely**, **what you can do next**.
 - Internal identifiers (run epochs, fencing state, outbox rows, Gateway routes) appear only in advanced/admin surfaces, never in standard-user messages (HARD-RULE-UX-005).
 - Safe silence beats unsafe output: a skipped review with a clear reason is always preferred over an unvalidated one (HARD-RULE-UX-006).
+
+## Implementation
+
+These messages are implemented in `apps/ci-review-bot/src/status/public-status.ts` and surfaced as the run's GitHub **check-run summary** by the executor: internal outcomes map to the plain-language messages above (`posted`, `no_issues`, `prd_missing`, `newer_commit`, `rate_limited`, `cannot_safely_review`, `ai_unavailable`), the conclusion is never `failure` (§23.3 — AI review does not block merge), and every standard-surface summary is checked against a leak guard (`containsInternalIdentifier`) so run epochs, fencing state, outbox rows, Gateway routes, SHAs, and raw internal errors never reach the user (HARD-RULE-UX-005). Proven in `tests/unit/public-status.test.ts` and `tests/integration/public-status.test.ts`.
