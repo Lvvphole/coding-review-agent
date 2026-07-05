@@ -25,11 +25,14 @@ import { PrRunCoordinator } from './concurrency/pr-run-coordinator.js';
 import { DebounceManager } from './concurrency/debounce-manager.js';
 import { PendingPostStore } from './outbox/pending-post-store.js';
 import { GitHubAppAuth, InstallationStore, StaticTokenProvider } from './adapters/github-app-auth.js';
-import { GitHubRestAdapter } from './adapters/github-rest.adapter.js';
+import { GitHubRestAdapter, GitHubRepoFileReader } from './adapters/github-rest.adapter.js';
 import { GitHubGraphQLAdapter } from './adapters/github-graphql.adapter.js';
 import { RunExecutor } from './workers/run-executor.js';
 import { PostingWorker } from './workers/posting-worker.js';
 import { loadHighRiskConfig, loadTaxonomy } from './config-files.js';
+import { AdminStore } from './admin/admin-store.js';
+import { AdminApi, type AdminRequest } from './admin/admin-api.js';
+import { StaticTokenAuthenticator, parseAdminTokens } from './admin/rbac.js';
 
 /**
  * ci-review-bot entrypoint — standing webhook-driven service (FR-EXEC-001).
@@ -40,6 +43,44 @@ import { loadHighRiskConfig, loadTaxonomy } from './config-files.js';
  * durable outbox. The LLM Gateway remains a stub until the Gateway sprint;
  * set DRY_RUN=true for shadow-mode onboarding (FR-SLO-008).
  */
+
+/** Adapts node:http to the transport-agnostic AdminApi.handle contract. */
+async function handleAdmin(
+  api: AdminApi,
+  req: import('node:http').IncomingMessage,
+  res: import('node:http').ServerResponse,
+): Promise<void> {
+  const url = new URL(req.url ?? '/', 'http://localhost');
+  const query: Record<string, string> = {};
+  for (const [k, v] of url.searchParams) query[k] = v;
+
+  let body: unknown;
+  if (req.method === 'POST' || req.method === 'PUT') {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk as Buffer);
+    const raw = Buffer.concat(chunks).toString('utf8');
+    if (raw.length > 0) {
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'invalid_json' }));
+        return;
+      }
+    }
+  }
+
+  const request: AdminRequest = {
+    method: req.method ?? 'GET',
+    path: url.pathname,
+    authorization: req.headers['authorization'],
+    query,
+    body,
+  };
+  const result = await api.handle(request);
+  res.writeHead(result.status, { 'content-type': 'application/json' });
+  res.end(JSON.stringify(result.body));
+}
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -101,6 +142,11 @@ async function main(): Promise<void> {
     integrationStatus: 'ACTIVE',
   };
 
+  // Onboarding/admin control state (Sprint 10). AdminStore doubles as the
+  // per-repo shadow resolver (FR-SLO-008): a newly onboarded repo reviews in
+  // shadow until an admin activates real posting.
+  const adminStore = new AdminStore(pool);
+
   const executor = new RunExecutor({
     pool,
     coordinator,
@@ -128,13 +174,17 @@ async function main(): Promise<void> {
     },
     postingPolicy,
     dryRun: config.review.dryRun,
+    // FR-SLO-008: per-repo shadow default; composes with dryRun by OR.
+    shadowResolver: adminStore,
     // Per-repo review mode (Light/Standard/Strict) presets over the controls
     // above; the safety floor is identical across modes (§10, HARD-RULE-UX-002).
     modeResolver: new ModeStore(pool),
     // Requirement-aware review (Sprint 8): resolve + Gateway-extract the repo's
     // PRD, inject as dynamic context. No PRD → general review (HARD-RULE-UX-004).
+    // repo_path/link PRDs are read from the repository at the PR head SHA via the
+    // GitHub contents API (Sprint 10 seam).
     prdProvider: new ManagedPrdContextProvider(
-      new PrdResolver(new PrdSourceStore(pool)),
+      new PrdResolver(new PrdSourceStore(pool), new GitHubRepoFileReader(github)),
       new PrdExtractor(pool, gateway, {
         taxonomyVersion: taxonomy.version,
         maxBytes: config.prd.maxBytes,
@@ -173,9 +223,22 @@ async function main(): Promise<void> {
     { handler: installationHandler, appWebhookSecret: config.github.webhookSecret },
   );
 
+  // Onboarding/admin API (Sprint 10, FR-SLO-009). Tokens come from the deploy's
+  // secret store via ADMIN_TOKENS; unset → the surface is closed (all 401).
+  const adminApi = new AdminApi({
+    auth: new StaticTokenAuthenticator(parseAdminTokens(process.env['ADMIN_TOKENS'])),
+    store: adminStore,
+    modes: new ModeStore(pool),
+    prd: new PrdSourceStore(pool),
+  });
+
   const server = createServer(async (req, res) => {
     if (req.method === 'GET' && req.url === '/healthz') {
       res.writeHead(200).end('ok');
+      return;
+    }
+    if (req.url && req.url.startsWith('/admin/')) {
+      await handleAdmin(adminApi, req, res);
       return;
     }
     if (req.method !== 'POST' || req.url !== '/webhooks/github') {

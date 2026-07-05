@@ -31,6 +31,17 @@ import {
  * persisted per step.
  */
 
+/**
+ * Per-repo shadow (dry-run) resolver (Sprint 10, FR-SLO-008). A newly onboarded
+ * repo starts in shadow so its first reviews are fully validated but never
+ * posted, until an admin activates real posting. Shadow only ever SUPPRESSES
+ * posting, so it can never weaken a safety gate; it composes with the global
+ * `dryRun` by OR (either forces shadow).
+ */
+export interface ShadowResolver {
+  isShadow(tenantId: string, repo: string): Promise<boolean>;
+}
+
 export interface RunExecutorDeps {
   pool: Pool;
   coordinator: PrRunCoordinator;
@@ -42,7 +53,13 @@ export interface RunExecutorDeps {
   highRisk: HighRiskConfig;
   validationPolicy: ValidationPolicy;
   postingPolicy: PostingPolicy;
+  /** Global shadow toggle (dev/local, FR-SLO-008). Per-repo shadow ORs on top. */
   dryRun: boolean;
+  /**
+   * Per-repo shadow resolver (Sprint 10). Absent → only the global `dryRun`
+   * governs shadow, so existing callers are byte-for-byte unaffected.
+   */
+  shadowResolver?: ShadowResolver;
   /**
    * Per-repo review-mode resolver (Sprint 7). When absent the executor keeps
    * the pre-mode behavior (base policies, no category suppression), so existing
@@ -293,8 +310,15 @@ export class RunExecutor {
         this.log('ci_review.findings.persist_failed', { runId: run.runId, error: String(err) });
       }
 
-      if (this.deps.dryRun) {
-        // FR-SLO-008 shadow mode: full pipeline, guard-checked, never posted.
+      // FR-SLO-008 shadow mode: the global dry-run toggle OR a per-repo shadow
+      // flag (a newly onboarded repo, not yet activated by an admin). Shadow
+      // runs the full guard-checked pipeline but never posts.
+      const shadow =
+        this.deps.dryRun ||
+        (this.deps.shadowResolver
+          ? await this.deps.shadowResolver.isShadow(run.tenantId, run.repo)
+          : false);
+      if (shadow) {
         await this.setState(run, 'COMPLETED');
         this.log('ci_review.run.dry_run_completed', {
           runId: run.runId,

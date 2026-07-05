@@ -84,6 +84,38 @@ HARD-RULE-UX-006: The product must default to safe silence over unsafe output. I
 
 These UX rules layer on top of — and never weaken — the PRD v6.5 production safety hard rules (§3).
 
+## Admin / Onboarding API (implemented)
+
+The managed flow above is served by a thin, API-first admin surface over the
+built platform (a heavy SPA is a non-goal). It is a tenant-scoped JSON API; a
+tenant is a GitHub App installation (`inst_<id>`, HARD-RULE-026). Implemented in
+`apps/ci-review-bot/src/admin/` (`admin-api.ts`, `admin-store.ts`, `rbac.ts`)
+and mounted under `/admin/` in `main.ts`.
+
+| Method & path | Role | Purpose |
+|---|---|---|
+| `GET /admin/tenant` | viewer | Install status: tenant lifecycle, GitHub integration/severance status, active repo count (FR-GH-019/020) |
+| `GET /admin/repos` | viewer | Per-repo list: review mode, shadow state, PRD attachment |
+| `POST /admin/repos/mode` | admin | Set a repo's review mode (light/standard/strict) → drives the next run |
+| `POST /admin/repos/prd` | admin | Attach a PRD by `upload`/`paste`/`link`/`repo_path` → requirement-aware review (HARD-RULE-UX-004) |
+| `POST /admin/repos/activate` | admin | Clear shadow → real posting (FR-SLO-008) |
+| `POST /admin/expungement` | admin | Purge raw PRD content, drop extraction cache, tombstone identity map (HARD-RULE-047) |
+
+**Authorization (FR-SLO-009).** Every request is authenticated to a
+tenant-scoped principal via `Authorization: Bearer <token>` (tokens come from the
+deploy's secret store as `ADMIN_TOKENS`; unset → the surface is closed). `viewer`
+is read-only, `admin` adds writes. A principal can act only within its own
+tenant — a cross-tenant repo is indistinguishable from a missing one (404). The
+review service still holds no provider keys (HARD-RULE-005); admin tokens are the
+only credential here.
+
+**Safe first-repo default (FR-SLO-008).** A newly onboarded repo starts in
+**shadow**: the full pipeline runs and every finding is guard-checked, but
+nothing is posted until an admin calls `activate`. Shadow only ever *suppresses*
+posting, so it can never weaken a safety gate. Mode and PRD writes reuse the
+existing `ModeStore.setMode` / `PrdSourceStore.setSource`; `repo_path`/`link`
+PRDs are read from the repository at the PR head SHA via the GitHub contents API.
+
 ## Related Product Docs
 
 - [Review Modes](review-modes.md) — Light / Standard / Strict
