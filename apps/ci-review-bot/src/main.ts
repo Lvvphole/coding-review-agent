@@ -18,6 +18,9 @@ import { WebhookHandler } from './handlers/webhook.handler.js';
 import { InstallationHandler } from './handlers/installation.handler.js';
 import { TenantStore } from './tenancy/tenant-store.js';
 import { ModeStore } from './review-modes/mode-store.js';
+import { PrdExtractor } from './prd/prd-extractor.js';
+import { PrdSourceStore, PrdResolver } from './prd/prd-store.js';
+import { ManagedPrdContextProvider } from './prd/prd-context-provider.js';
 import { PrRunCoordinator } from './concurrency/pr-run-coordinator.js';
 import { DebounceManager } from './concurrency/debounce-manager.js';
 import { PendingPostStore } from './outbox/pending-post-store.js';
@@ -128,6 +131,16 @@ async function main(): Promise<void> {
     // Per-repo review mode (Light/Standard/Strict) presets over the controls
     // above; the safety floor is identical across modes (§10, HARD-RULE-UX-002).
     modeResolver: new ModeStore(pool),
+    // Requirement-aware review (Sprint 8): resolve + Gateway-extract the repo's
+    // PRD, inject as dynamic context. No PRD → general review (HARD-RULE-UX-004).
+    prdProvider: new ManagedPrdContextProvider(
+      new PrdResolver(new PrdSourceStore(pool)),
+      new PrdExtractor(pool, gateway, {
+        taxonomyVersion: taxonomy.version,
+        maxBytes: config.prd.maxBytes,
+        maxChunks: config.prd.maxChunks,
+      }),
+    ),
   });
 
   const postingWorker = new PostingWorker({

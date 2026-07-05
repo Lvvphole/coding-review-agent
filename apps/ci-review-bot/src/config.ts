@@ -50,6 +50,12 @@ export interface BotConfig {
     maxRetries: number;
     expireAfterHours: number;
   };
+  prd: {
+    /** Single prd_extraction call budget; larger PRDs are chunked (map-reduce). */
+    maxBytes: number;
+    /** Cap on map chunks; over-budget PRDs keep the highest-priority head. */
+    maxChunks: number;
+  };
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): BotConfig {
@@ -96,6 +102,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BotConfig {
       lockTtlSeconds: 120,
       maxRetries: 3,
       expireAfterHours: 24,
+    },
+    prd: {
+      maxBytes: Number(env['PRD_MAX_BYTES'] ?? 24000),
+      maxChunks: Number(env['PRD_MAX_CHUNKS'] ?? 8),
     },
   };
 }

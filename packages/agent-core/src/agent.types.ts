@@ -20,6 +20,12 @@ export interface AgentContext {
   chunks: FileChunk[];
   /** Stable global prompt prefix — FR-CTX-013/030; reusable across PRs. */
   stablePrefix: string;
+  /**
+   * PRD-derived review criteria for requirement-aware review (HARD-RULE-UX-004).
+   * Dynamic per-run context only — never the stable prefix (HARD-RULE-021).
+   * Absent → general review.
+   */
+  prdCriteria?: string;
   cancellation: AbortSignal;
 }
 

@@ -24,6 +24,8 @@ class GatewayReviewerAgent implements ReviewAgent {
       `repo: ${ctx.run.repo}`,
       `pull_request_id: ${ctx.run.pullRequestId}`,
       `head_sha: ${ctx.run.headSha}`,
+      // Requirement-aware review criteria (dynamic per-run, HARD-RULE-021).
+      ...(ctx.prdCriteria ? ['', ctx.prdCriteria, ''] : []),
       `files under review:`,
       ...ctx.files.map(
         (f) => `- ${f.file.path}${f.highRisk ? ` [HIGH RISK: ${f.highRiskCategory}]` : ''}`,
