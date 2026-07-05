@@ -46,6 +46,8 @@ export async function runReviewPipeline(input: {
   highRisk: HighRiskConfig;
   validationPolicy: ValidationPolicy;
   reviewIgnoreContent?: string;
+  /** PRD-derived criteria injected as dynamic agent context (HARD-RULE-UX-004). */
+  prdCriteriaContext?: string;
   cancellation: AbortSignal;
 }): Promise<ReviewPipelineResult> {
   // Deterministic filters before LLM use (HARD-RULE-007).
@@ -87,6 +89,7 @@ export async function runReviewPipeline(input: {
     diffText: input.diffText,
     chunks,
     stablePrefix: STABLE_REVIEW_PREFIX,
+    ...(input.prdCriteriaContext !== undefined ? { prdCriteria: input.prdCriteriaContext } : {}),
     cancellation: input.cancellation,
   });
 

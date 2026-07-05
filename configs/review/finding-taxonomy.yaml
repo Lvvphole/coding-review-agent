@@ -103,6 +103,30 @@ taxonomy:
         - swallowed exception
         - empty catch
         - ignored error
+    # PRD-alignment family (Sprint 8, HARD-RULE-UX-004). Requirement-gap
+    # findings still pass every normal gate (HARD-RULE-031); surfaced only when
+    # a PRD is attached and injected as dynamic context.
+    - id: REQUIREMENT.UNIMPLEMENTED_REQUIREMENT
+      family: REQUIREMENT_ALIGNMENT
+      category: bug
+      aliases:
+        - unimplemented requirement
+        - prd requirement not met
+        - missing required behavior
+    - id: REQUIREMENT.CONTRADICTS_PRD
+      family: REQUIREMENT_ALIGNMENT
+      category: bug
+      aliases:
+        - contradicts prd
+        - violates acceptance criteria
+        - behavior diverges from spec
+    - id: REQUIREMENT.MISSING_TEST_FOR_REQUIREMENT
+      family: REQUIREMENT_ALIGNMENT
+      category: test_gap
+      aliases:
+        - missing test for requirement
+        - acceptance criterion untested
+        - prd test expectation not covered
   repository_extensions:
     enabled: true
     rules: []

@@ -5,6 +5,7 @@ import type { ValidationPolicy } from '@review-bot/validators';
 import type { ReviewAgent } from '@review-bot/agent-core';
 import { applyMode, type EffectivePolicies } from '../review-modes/modes.js';
 import type { ModeResolver } from '../review-modes/mode-store.js';
+import type { PrdContextProvider } from '../prd/prd-context-provider.js';
 import { transition } from '../state-machine/machine.js';
 import { PrRunCoordinator } from '../concurrency/pr-run-coordinator.js';
 import { DebounceManager } from '../concurrency/debounce-manager.js';
@@ -47,6 +48,12 @@ export interface RunExecutorDeps {
    * callers are unaffected.
    */
   modeResolver?: ModeResolver;
+  /**
+   * PRD-derived requirement-aware review context (Sprint 8). When absent, or
+   * when it returns null for a repo with no PRD, the run is a general review
+   * (docs/product/failure-ux.md fallback).
+   */
+  prdProvider?: PrdContextProvider;
   /** Spend accounting (HARD-RULE-024/025); optional until the event bus sprint. */
   ledger?: SpendLedger;
   log?: (msg: string, fields?: Record<string, unknown>) => void;
@@ -182,10 +189,37 @@ export class RunExecutor {
 
       state = transition(state, 'EVT_CONTEXT_READY').next; // GATEWAY_REQUESTING
       await this.setState(run, state);
+
+      const cancellation = new AbortController();
+
+      // Requirement-aware review (Sprint 8): resolve + extract the PRD (once, at
+      // head SHA, Gateway-routed). Extraction failure never fails the run — it
+      // falls back to a general review (HARD-RULE-UX-004, docs/product/failure-ux.md).
+      let prdCriteriaContext: string | undefined;
+      if (this.deps.prdProvider) {
+        try {
+          const prd = await this.deps.prdProvider.provide(run, cancellation.signal);
+          if (prd) {
+            prdCriteriaContext = prd.context;
+            this.log('ci_review.prd.attached', {
+              runId: run.runId,
+              sourceRef: prd.sourceRef,
+              truncated: prd.truncated,
+            });
+          } else {
+            this.log('ci_review.prd.absent_general_review', { runId: run.runId });
+          }
+        } catch (err) {
+          this.log('ci_review.prd.extract_failed_general_review', {
+            runId: run.runId,
+            error: String(err),
+          });
+        }
+      }
+
       state = transition(state, 'EVT_GATEWAY_OK').next; // AGENTS_RUNNING
       await this.setState(run, state);
 
-      const cancellation = new AbortController();
       const result = await runReviewPipeline({
         run,
         diffText,
@@ -193,6 +227,7 @@ export class RunExecutor {
         contextPolicy: effective.contextPolicy,
         highRisk: this.deps.highRisk,
         validationPolicy: effective.validationPolicy,
+        ...(prdCriteriaContext !== undefined ? { prdCriteriaContext } : {}),
         cancellation: cancellation.signal,
       });
 
