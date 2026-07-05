@@ -17,7 +17,8 @@ export async function truncateAll(pool: pg.Pool): Promise<void> {
   await pool.query(
     `TRUNCATE review_runs, pr_fencing_state, github_webhook_deliveries,
               pending_review_posts, github_installations,
-              review_findings, spend_ledger, spend_ledger_identity_map`,
+              review_findings, spend_ledger, spend_ledger_identity_map,
+              repositories, tenants`,
   );
 }
 

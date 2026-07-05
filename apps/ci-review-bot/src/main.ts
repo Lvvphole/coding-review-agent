@@ -14,7 +14,9 @@ import { loadConfig } from './config.js';
 import { createPool } from './db/pool.js';
 import { migrate } from './db/migrate.js';
 import { WebhookDeliveryStore } from './handlers/webhook-delivery-store.js';
-import { WebhookHandler, type TenantResolver } from './handlers/webhook.handler.js';
+import { WebhookHandler } from './handlers/webhook.handler.js';
+import { InstallationHandler } from './handlers/installation.handler.js';
+import { TenantStore } from './tenancy/tenant-store.js';
 import { PrRunCoordinator } from './concurrency/pr-run-coordinator.js';
 import { DebounceManager } from './concurrency/debounce-manager.js';
 import { PendingPostStore } from './outbox/pending-post-store.js';
@@ -34,17 +36,6 @@ import { loadHighRiskConfig, loadTaxonomy } from './config-files.js';
  * durable outbox. The LLM Gateway remains a stub until the Gateway sprint;
  * set DRY_RUN=true for shadow-mode onboarding (FR-SLO-008).
  */
-
-/** Env-var tenant mapping stub; replaced by tenants table lookup. */
-class EnvTenantResolver implements TenantResolver {
-  async resolveTenant(repoFullName: string): Promise<{ tenantId: string; webhookSecret: string } | null> {
-    const secret = process.env['GITHUB_WEBHOOK_SECRET'];
-    const allowedRepos = (process.env['TENANT_REPOS'] ?? '').split(',').filter(Boolean);
-    if (!secret) return null;
-    if (allowedRepos.length > 0 && !allowedRepos.includes(repoFullName)) return null;
-    return { tenantId: process.env['TENANT_ID'] ?? 'tenant_default', webhookSecret: secret };
-  }
-}
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -146,12 +137,24 @@ async function main(): Promise<void> {
   });
   await postingWorker.recoverOnStartup(); // FR-POST-039
 
-  const handler = new WebhookHandler(new EnvTenantResolver(), deliveries, redis, {
-    idempotencyTtlHours: config.webhookIdempotency.ttlHours,
-    skipDraftPrs: config.review.skipDraftPrsByDefault,
-    reviewBotAuthoredPrs: config.review.reviewBotAuthoredPrsByDefault,
-    botLogin: config.botLogin,
-  });
+  // Managed tenancy: an install provisions a tenant + repos; repo→tenant
+  // resolution replaces the env stub and fails closed for uninstalled repos
+  // (HARD-RULE-026, FR-TENANT-013). One App-level webhook secret verifies all
+  // deliveries in managed mode.
+  const tenants = new TenantStore(pool, config.github.webhookSecret);
+  const installationHandler = new InstallationHandler(tenants);
+  const handler = new WebhookHandler(
+    tenants,
+    deliveries,
+    redis,
+    {
+      idempotencyTtlHours: config.webhookIdempotency.ttlHours,
+      skipDraftPrs: config.review.skipDraftPrsByDefault,
+      reviewBotAuthoredPrs: config.review.reviewBotAuthoredPrsByDefault,
+      botLogin: config.botLogin,
+    },
+    { handler: installationHandler, appWebhookSecret: config.github.webhookSecret },
+  );
 
   const server = createServer(async (req, res) => {
     if (req.method === 'GET' && req.url === '/healthz') {
@@ -177,6 +180,10 @@ async function main(): Promise<void> {
     }
     if (outcome.kind === 'noop_accepted') {
       res.writeHead(202).end(JSON.stringify({ status: 'noop_accepted', reason: outcome.reason }));
+      return;
+    }
+    if (outcome.kind === 'lifecycle_accepted') {
+      res.writeHead(202).end(JSON.stringify({ status: 'lifecycle_accepted', detail: outcome.detail }));
       return;
     }
 
