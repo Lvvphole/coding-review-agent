@@ -6,6 +6,7 @@ import type { ReviewAgent } from '@review-bot/agent-core';
 import { applyMode, type EffectivePolicies } from '../review-modes/modes.js';
 import type { ModeResolver } from '../review-modes/mode-store.js';
 import type { PrdContextProvider } from '../prd/prd-context-provider.js';
+import { publicStatus, type PublicStatusKind } from '../status/public-status.js';
 import { transition } from '../state-machine/machine.js';
 import { PrRunCoordinator } from '../concurrency/pr-run-coordinator.js';
 import { DebounceManager } from '../concurrency/debounce-manager.js';
@@ -171,7 +172,7 @@ export class RunExecutor {
     try {
       let state = transition('QUEUED', 'EVT_RUN_DEQUEUED').next; // CONTEXT_PREPARING
       await this.setState(run, state);
-      await this.reportCheck(run, 'in_progress', 'AI review in progress');
+      await this.reportCheck(run, 'in_progress', publicStatus('in_progress').summary);
 
       // Resolve the per-repo mode into effective policies (safety floor intact).
       const effective = await this.resolveEffective(run);
@@ -196,6 +197,7 @@ export class RunExecutor {
       // head SHA, Gateway-routed). Extraction failure never fails the run — it
       // falls back to a general review (HARD-RULE-UX-004, docs/product/failure-ux.md).
       let prdCriteriaContext: string | undefined;
+      let prdMissing = false;
       if (this.deps.prdProvider) {
         try {
           const prd = await this.deps.prdProvider.provide(run, cancellation.signal);
@@ -207,6 +209,7 @@ export class RunExecutor {
               truncated: prd.truncated,
             });
           } else {
+            prdMissing = true;
             this.log('ci_review.prd.absent_general_review', { runId: run.runId });
           }
         } catch (err) {
@@ -271,7 +274,10 @@ export class RunExecutor {
 
       if (surfaced.length === 0) {
         await this.setState(run, transition(state, 'EVT_VALIDATION_FAIL').next); // COMPLETED
-        await this.reportCheck(run, 'completed', 'AI review found no reportable issues', 'success');
+        // A clean general review with no PRD attached surfaces the "add a PRD"
+        // notice instead of a bare "no issues" (HARD-RULE-UX-004/006).
+        const clean = publicStatus(prdMissing ? 'prd_missing' : 'no_issues');
+        await this.reportCheck(run, 'completed', clean.summary, clean.conclusion);
         this.log('ci_review.run.completed', { runId: run.runId, findings: 0, mode: effective.mode });
         return;
       }
@@ -340,17 +346,25 @@ export class RunExecutor {
           await this.setState(run, 'BLOCKED');
           break;
       }
-      // AI review never blocks merge by default (§23.3 CI rule): conclusion
-      // is neutral/success, not failure, regardless of findings.
-      const summary =
-        outcome.kind === 'posted' || outcome.kind === 'already_posted'
-          ? `AI review posted ${surfaced.length} finding(s)`
-          : `AI review finished: ${outcome.kind}`;
-      await this.reportCheck(run, 'completed', summary, 'neutral');
+      // AI review never blocks merge by default (§23.3 CI rule): conclusion is
+      // neutral/cancelled/success, never failure. The user-facing summary is a
+      // plain-language message with no internal identifiers (HARD-RULE-UX-005).
+      const OUTCOME_STATUS: Record<typeof outcome.kind, PublicStatusKind> = {
+        posted: 'posted',
+        already_posted: 'posted',
+        backoff_queued: 'rate_limited',
+        stale_discarded: 'newer_commit',
+        blocked: 'cannot_safely_review',
+      };
+      const status = publicStatus(OUTCOME_STATUS[outcome.kind], { findingCount: surfaced.length });
+      await this.reportCheck(run, 'completed', status.summary, status.conclusion);
       this.log('ci_review.run.finished', { runId: run.runId, outcome: outcome.kind });
     } catch (err) {
       await this.setState(run, 'FAILED');
-      await this.reportCheck(run, 'completed', 'AI review failed internally', 'neutral');
+      // Safe silence over unsafe output (HARD-RULE-UX-006): the public message
+      // never exposes the internal failure (HARD-RULE-UX-005); details go to logs.
+      const safe = publicStatus('cannot_safely_review');
+      await this.reportCheck(run, 'completed', safe.summary, safe.conclusion);
       this.log('ci_review.run.failed', { runId: run.runId, error: String(err) });
     }
   }
