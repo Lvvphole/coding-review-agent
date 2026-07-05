@@ -10,6 +10,7 @@ import {
 } from './github.adapter.js';
 import type { InstallationTokenProvider } from './github-app-auth.js';
 import type { GitHubGraphQLAdapter } from './github-graphql.adapter.js';
+import type { RepoFileReader } from '../prd/prd-store.js';
 
 /**
  * GitHub REST adapter — the production GitHubAdapter implementation.
@@ -185,6 +186,26 @@ export class GitHubRestAdapter implements GitHubAdapter {
     return response.text();
   }
 
+  /**
+   * Reads a repository file at a ref via the contents API (Sprint 10). Backs the
+   * repo_path/link PRD sources: the resolver reads at the PR head SHA, so a
+   * mid-run edit can never affect an in-flight run (fenced exactly like the
+   * diff read). A missing file (404) is a normal outcome → null (general-review
+   * fallback), while 401/403 stay as severance and propagate.
+   */
+  async getFileContents(repo: string, path: string, ref: string): Promise<string | null> {
+    const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+    const url = `/repos/${repo}/contents/${encodedPath}?ref=${encodeURIComponent(ref)}`;
+    try {
+      const response = await this.read(url, 'application/vnd.github.raw');
+      return response.text();
+    } catch (err) {
+      // Absent file: not an error, just "no PRD there" (FR fallback).
+      if (err instanceof GitHubReadError && err.status === 404) return null;
+      throw err; // severance / exhausted retries propagate
+    }
+  }
+
   async getReplyCount(repo: string, pullRequestId: number, commentId: string): Promise<number | null> {
     try {
       const response = await this.read(`/repos/${repo}/pulls/${pullRequestId}/comments?per_page=100`);
@@ -227,5 +248,18 @@ export class GitHubRestAdapter implements GitHubAdapter {
     if (!response.ok) {
       throw new GitHubReadError(`check-run POST failed: ${response.status}`, response.status);
     }
+  }
+}
+
+/**
+ * Adapts the REST adapter's contents read to the PRD `RepoFileReader` seam
+ * (Sprint 10). Wired into `PrdResolver` in main.ts so repo_path/link PRDs are
+ * read from the repository at the PR head SHA.
+ */
+export class GitHubRepoFileReader implements RepoFileReader {
+  constructor(private readonly rest: Pick<GitHubRestAdapter, 'getFileContents'>) {}
+
+  read(repo: string, path: string, ref: string): Promise<string | null> {
+    return this.rest.getFileContents(repo, path, ref);
   }
 }

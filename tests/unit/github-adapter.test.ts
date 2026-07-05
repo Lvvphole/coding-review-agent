@@ -1,7 +1,10 @@
 import { generateKeyPairSync, createVerify } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { buildAppJwt, StaticTokenProvider } from '../../apps/ci-review-bot/src/adapters/github-app-auth.js';
-import { GitHubRestAdapter } from '../../apps/ci-review-bot/src/adapters/github-rest.adapter.js';
+import {
+  GitHubRestAdapter,
+  GitHubRepoFileReader,
+} from '../../apps/ci-review-bot/src/adapters/github-rest.adapter.js';
 import {
   FakeGitHubAdapter,
   GitHubIntegrationSeveredError,
@@ -108,6 +111,62 @@ describe('GitHubRestAdapter error mapping', () => {
   it('getReplyCount returns null when the read fails (FR-POST-034)', async () => {
     const { rest } = adapter([{ status: 500 }, { status: 500 }, { status: 500 }, { status: 500 }]);
     expect(await rest.getReplyCount('org/proj', 7, 'c1')).toBeNull();
+  });
+});
+
+describe('getFileContents — PRD repo_path/link read seam (Sprint 10)', () => {
+  // A raw-content fetch: the contents API with accept=raw returns file bytes,
+  // not JSON, so this stub returns a plain-text Response body.
+  function rawAdapter(
+    steps: { status: number; text?: string; headers?: Record<string, string> }[],
+  ): { rest: GitHubRestAdapter; calls: { url: string; accept: string }[] } {
+    const calls: { url: string; accept: string }[] = [];
+    const impl = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      calls.push({ url: String(url), accept: headers['accept'] ?? '' });
+      const step = steps.shift() ?? { status: 200, text: '' };
+      return new Response(step.text ?? '', { status: step.status, headers: step.headers });
+    }) as typeof fetch;
+    return {
+      calls,
+      rest: new GitHubRestAdapter({
+        apiBaseUrl: 'https://fake.local',
+        tokens: new StaticTokenProvider('t'),
+        botLogin: 'bot',
+        readMaxRetries: 3,
+        fetchImpl: impl,
+        sleepImpl: async () => {},
+      }),
+    };
+  }
+
+  it('returns raw file text and requests the contents API at the ref', async () => {
+    const { rest, calls } = rawAdapter([{ status: 200, text: '# PRD\nrequirements' }]);
+    const text = await rest.getFileContents('org/proj', 'docs/PRD.md', 'sha-a');
+    expect(text).toBe('# PRD\nrequirements');
+    expect(calls[0]!.url).toBe('https://fake.local/repos/org/proj/contents/docs/PRD.md?ref=sha-a');
+    expect(calls[0]!.accept).toBe('application/vnd.github.raw');
+  });
+
+  it('a missing file (404) resolves to null (general-review fallback)', async () => {
+    const { rest } = rawAdapter([{ status: 404 }]);
+    expect(await rest.getFileContents('org/proj', 'nope.md', 'sha-a')).toBeNull();
+  });
+
+  it('401/403 propagate as integration severance (never null)', async () => {
+    const { rest } = rawAdapter([{ status: 403 }]);
+    await expect(rest.getFileContents('org/proj', 'docs/PRD.md', 'sha-a')).rejects.toBeInstanceOf(
+      GitHubIntegrationSeveredError,
+    );
+  });
+
+  it('GitHubRepoFileReader delegates read() to getFileContents', async () => {
+    const reader = new GitHubRepoFileReader({
+      async getFileContents(repo, path, ref) {
+        return `${repo}|${path}|${ref}`;
+      },
+    });
+    expect(await reader.read('org/proj', 'docs/PRD.md', 'sha-a')).toBe('org/proj|docs/PRD.md|sha-a');
   });
 });
 
