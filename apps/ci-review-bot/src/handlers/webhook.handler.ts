@@ -1,6 +1,12 @@
 import { createHmac, timingSafeEqual, createHash } from 'node:crypto';
 import type { Redis } from 'ioredis';
 import type { WebhookDeliveryStore } from './webhook-delivery-store.js';
+import { tenantIdForInstallation } from '../tenancy/tenant-store.js';
+import type {
+  InstallationHandler,
+  InstallationEventPayload,
+  InstallationOutcome,
+} from './installation.handler.js';
 
 /**
  * Webhook ingestion pipeline — PRD v6.5 §4.2 ordering:
@@ -34,8 +40,19 @@ export interface NormalizedPrEvent {
 
 export type WebhookOutcome =
   | { kind: 'accepted'; event: NormalizedPrEvent }
+  | { kind: 'lifecycle_accepted'; detail: InstallationOutcome }
   | { kind: 'noop_accepted'; reason: 'duplicate_delivery' | 'bot_event_ignored' | 'draft_pr_skipped' | 'unsupported_event' }
   | { kind: 'rejected'; status: number; reason: string };
+
+/**
+ * Installation lifecycle dependencies. Managed mode verifies these events with
+ * the App-level webhook secret (there is no per-repo tenant yet — the install
+ * creates it) and delegates to the tenant provisioner.
+ */
+export interface WebhookLifecycleDeps {
+  handler: InstallationHandler;
+  appWebhookSecret: string;
+}
 
 export interface WebhookPolicy {
   idempotencyTtlHours: number;
@@ -68,6 +85,7 @@ export class WebhookHandler {
     private readonly deliveries: WebhookDeliveryStore,
     private readonly redis: Redis,
     private readonly policy: WebhookPolicy,
+    private readonly lifecycle?: WebhookLifecycleDeps,
   ) {}
 
   async handle(input: {
@@ -78,6 +96,14 @@ export class WebhookHandler {
   }): Promise<WebhookOutcome> {
     if (!input.deliveryId || !input.eventType) {
       return { kind: 'rejected', status: 400, reason: 'missing delivery id or event type' };
+    }
+    if (input.eventType === 'installation' || input.eventType === 'installation_repositories') {
+      return this.handleLifecycle({
+        deliveryId: input.deliveryId,
+        eventType: input.eventType,
+        signature: input.signature,
+        rawBody: input.rawBody,
+      });
     }
     if (input.eventType !== 'pull_request') {
       return { kind: 'noop_accepted', reason: 'unsupported_event' };
@@ -196,5 +222,74 @@ export class WebhookHandler {
       return { kind: 'rejected', status: 400, reason: 'missing head sha' };
     }
     return { kind: 'accepted', event };
+  }
+
+  /**
+   * installation / installation_repositories — verify with the App webhook
+   * secret before any state mutation (FORBIDDEN-025), dedupe at the edge
+   * (FR-GH-016), then provision/sever the tenant. tenant_id = inst_<id> so
+   * redeliveries collapse deterministically.
+   */
+  private async handleLifecycle(input: {
+    deliveryId: string;
+    eventType: string;
+    signature: string | undefined;
+    rawBody: Buffer;
+  }): Promise<WebhookOutcome> {
+    if (!this.lifecycle) {
+      return { kind: 'noop_accepted', reason: 'unsupported_event' };
+    }
+    if (!verifySignature(this.lifecycle.appWebhookSecret, input.rawBody, input.signature)) {
+      return { kind: 'rejected', status: 401, reason: 'invalid webhook signature (fail closed)' };
+    }
+
+    let payload: InstallationEventPayload;
+    try {
+      payload = JSON.parse(input.rawBody.toString('utf8'));
+    } catch {
+      return { kind: 'rejected', status: 400, reason: 'invalid JSON payload' };
+    }
+
+    const installationId = payload.installation?.id;
+    if (!installationId || !payload.action || !payload.installation?.account?.login) {
+      return { kind: 'rejected', status: 400, reason: 'missing installation, account, or action' };
+    }
+    const tenantId = tenantIdForInstallation(installationId);
+
+    // Edge idempotency: installation redeliveries are safe (FR-GH-016). Redis
+    // SETNX fast lock, Postgres durable authority.
+    const payloadHash = createHash('sha256').update(input.rawBody).digest('hex');
+    const redisKey = `tenant:${tenantId}:webhook:delivery:${input.deliveryId}`;
+    const setnx = await this.redis.set(
+      redisKey,
+      payloadHash,
+      'EX',
+      this.policy.idempotencyTtlHours * 3600,
+      'NX',
+    );
+    if (setnx === null) {
+      const knownHash = await this.redis.get(redisKey);
+      if (knownHash !== null && knownHash !== payloadHash) {
+        return { kind: 'rejected', status: 400, reason: 'delivery payload hash mismatch (fail closed)' };
+      }
+    }
+    const decision = await this.deliveries.recordDelivery({
+      tenantId,
+      deliveryId: input.deliveryId,
+      payloadHash,
+      eventType: input.eventType,
+      repo: `installation:${installationId}`,
+      pullRequestId: null,
+      ttlHours: this.policy.idempotencyTtlHours,
+    });
+    if (decision.kind === 'hash_mismatch_blocked') {
+      return { kind: 'rejected', status: 400, reason: 'delivery payload hash mismatch (fail closed)' };
+    }
+    if (decision.kind === 'duplicate_ignored') {
+      return { kind: 'noop_accepted', reason: 'duplicate_delivery' };
+    }
+
+    const detail = await this.lifecycle.handler.handle(input.eventType, payload);
+    return { kind: 'lifecycle_accepted', detail };
   }
 }

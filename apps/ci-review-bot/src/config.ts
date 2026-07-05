@@ -15,6 +15,8 @@ export interface BotConfig {
     privateKeyPem: string;
     installationId: number;
     org: string;
+    /** App-level webhook secret; managed mode verifies all deliveries with it. */
+    webhookSecret: string;
     readMaxRetries: number;
     refreshBeforeExpirySeconds: number;
     maxRefreshRetries: number;
@@ -62,6 +64,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BotConfig {
       privateKeyPem: env['GITHUB_APP_PRIVATE_KEY'] ?? '',
       installationId: Number(env['GITHUB_INSTALLATION_ID'] ?? 0),
       org: env['GITHUB_ORG'] ?? '',
+      webhookSecret: env['GITHUB_WEBHOOK_SECRET'] ?? '',
       readMaxRetries: 3,
       refreshBeforeExpirySeconds: 300,
       maxRefreshRetries: 2,
