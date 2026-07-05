@@ -1,8 +1,10 @@
 import type { Pool } from 'pg';
-import type { RunIdentity } from '@review-bot/shared';
+import type { Category, RunIdentity } from '@review-bot/shared';
 import type { ContextPolicy, HighRiskConfig } from '@review-bot/context-engine';
 import type { ValidationPolicy } from '@review-bot/validators';
 import type { ReviewAgent } from '@review-bot/agent-core';
+import { applyMode, type EffectivePolicies } from '../review-modes/modes.js';
+import type { ModeResolver } from '../review-modes/mode-store.js';
 import { transition } from '../state-machine/machine.js';
 import { PrRunCoordinator } from '../concurrency/pr-run-coordinator.js';
 import { DebounceManager } from '../concurrency/debounce-manager.js';
@@ -39,6 +41,12 @@ export interface RunExecutorDeps {
   validationPolicy: ValidationPolicy;
   postingPolicy: PostingPolicy;
   dryRun: boolean;
+  /**
+   * Per-repo review-mode resolver (Sprint 7). When absent the executor keeps
+   * the pre-mode behavior (base policies, no category suppression), so existing
+   * callers are unaffected.
+   */
+  modeResolver?: ModeResolver;
   /** Spend accounting (HARD-RULE-024/025); optional until the event bus sprint. */
   ledger?: SpendLedger;
   log?: (msg: string, fields?: Record<string, unknown>) => void;
@@ -113,6 +121,24 @@ export class RunExecutor {
     await this.deps.coordinator.updateRunStatus(run.runId, state);
   }
 
+  /**
+   * Resolve the per-repo review mode into effective, safety-floored policies.
+   * With no resolver configured, returns the base policies unchanged so the
+   * pre-mode path is byte-for-byte preserved.
+   */
+  private async resolveEffective(run: RunIdentity): Promise<EffectivePolicies> {
+    const base = {
+      validationPolicy: this.deps.validationPolicy,
+      contextPolicy: this.deps.contextPolicy,
+      maxInlineComments: this.deps.postingPolicy.maxInlineComments,
+    };
+    if (!this.deps.modeResolver) {
+      return { ...base, suppressedCategories: new Set<Category>(), mode: 'standard' };
+    }
+    const mode = await this.deps.modeResolver.resolveMode(run.tenantId, run.repo);
+    return applyMode(base, mode);
+  }
+
   /** FR-CHECK-005: check-run reporting must never fail or bypass the run. */
   private async reportCheck(
     run: RunIdentity,
@@ -140,6 +166,9 @@ export class RunExecutor {
       await this.setState(run, state);
       await this.reportCheck(run, 'in_progress', 'AI review in progress');
 
+      // Resolve the per-repo mode into effective policies (safety floor intact).
+      const effective = await this.resolveEffective(run);
+
       let diffText: string;
       try {
         diffText = await this.deps.github.getDiff(run.repo, run.pullRequestId);
@@ -161,9 +190,9 @@ export class RunExecutor {
         run,
         diffText,
         agents: this.deps.agents,
-        contextPolicy: this.deps.contextPolicy,
+        contextPolicy: effective.contextPolicy,
         highRisk: this.deps.highRisk,
-        validationPolicy: this.deps.validationPolicy,
+        validationPolicy: effective.validationPolicy,
         cancellation: cancellation.signal,
       });
 
@@ -196,10 +225,19 @@ export class RunExecutor {
       state = transition(state, 'EVT_AGGREGATION_DONE').next; // VERIFYING
       await this.setState(run, state);
 
-      if (result.validated.length === 0) {
+      // Mode surfacing (Sprint 7): drop suppressed categories AFTER validation.
+      // Every survivor still passed all safety gates; suppression only governs
+      // what this mode surfaces, never the validation floor. security/bug are
+      // never in the suppressed set.
+      const surfaced =
+        effective.suppressedCategories.size === 0
+          ? result.validated
+          : result.validated.filter((f) => !effective.suppressedCategories.has(f.category as Category));
+
+      if (surfaced.length === 0) {
         await this.setState(run, transition(state, 'EVT_VALIDATION_FAIL').next); // COMPLETED
         await this.reportCheck(run, 'completed', 'AI review found no reportable issues', 'success');
-        this.log('ci_review.run.completed', { runId: run.runId, findings: 0 });
+        this.log('ci_review.run.completed', { runId: run.runId, findings: 0, mode: effective.mode });
         return;
       }
 
@@ -219,17 +257,23 @@ export class RunExecutor {
         await this.setState(run, 'COMPLETED');
         this.log('ci_review.run.dry_run_completed', {
           runId: run.runId,
-          findings: result.validated.length,
-          titles: result.validated.map((f) => `${f.file}:${f.line} ${f.title}`),
+          mode: effective.mode,
+          findings: surfaced.length,
+          titles: surfaced.map((f) => `${f.file}:${f.line} ${f.title}`),
         });
         return;
       }
 
-      const outcome = await postFindings(run, result.validated, this.deps.postingPolicy, {
-        github: this.deps.github,
-        coordinator: this.deps.coordinator,
-        pendingPosts: this.deps.pendingPosts,
-      });
+      const outcome = await postFindings(
+        run,
+        surfaced,
+        { ...this.deps.postingPolicy, maxInlineComments: effective.maxInlineComments },
+        {
+          github: this.deps.github,
+          coordinator: this.deps.coordinator,
+          pendingPosts: this.deps.pendingPosts,
+        },
+      );
 
       switch (outcome.kind) {
         case 'posted': {
@@ -265,7 +309,7 @@ export class RunExecutor {
       // is neutral/success, not failure, regardless of findings.
       const summary =
         outcome.kind === 'posted' || outcome.kind === 'already_posted'
-          ? `AI review posted ${result.validated.length} finding(s)`
+          ? `AI review posted ${surfaced.length} finding(s)`
           : `AI review finished: ${outcome.kind}`;
       await this.reportCheck(run, 'completed', summary, 'neutral');
       this.log('ci_review.run.finished', { runId: run.runId, outcome: outcome.kind });

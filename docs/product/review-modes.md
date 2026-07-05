@@ -42,4 +42,4 @@ The following hold in **every** mode and are never relaxed (PRD v6.5 §3):
 - Secrets are redacted or blocked before posting (HARD-RULE-038).
 - All model access is Gateway-only; the review service holds no provider keys (HARD-RULE-003/004/005).
 
-> Review modes are a defined product behavior. The tuning presets above describe the intended mapping onto the platform controls that already exist in this repository (`configs/review/`).
+> Review modes are implemented. The presets live in `apps/ci-review-bot/src/review-modes/modes.ts` (typed, unit-tested) and map onto the platform controls in `configs/review/`; per-repo selection is stored on the `repositories` table and resolved per run by `ModeStore`. `applyMode` only raises the general confidence floor, caps comment volume, and gates surfaced categories — it never lowers a safety gate, and **security and bug findings surface in every mode** (proven by the safety-floor invariant tests in `tests/unit/review-modes.test.ts` and `tests/integration/review-modes.test.ts`).
