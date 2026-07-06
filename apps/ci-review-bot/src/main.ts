@@ -31,6 +31,8 @@ import { GitHubGraphQLAdapter } from './adapters/github-graphql.adapter.js';
 import { RunExecutor } from './workers/run-executor.js';
 import { PostingWorker } from './workers/posting-worker.js';
 import { loadHighRiskConfig, loadTaxonomy } from './config-files.js';
+import { SpendLedger } from './ledger/spend-ledger.js';
+import { makeTenantLedgerKeyProvider } from './ledger/tenant-key.js';
 import { AdminStore } from './admin/admin-store.js';
 import { AdminApi, type AdminRequest } from './admin/admin-api.js';
 import { StaticTokenAuthenticator, parseAdminTokens } from './admin/rbac.js';
@@ -148,6 +150,17 @@ async function main(): Promise<void> {
   // shadow until an admin activates real posting.
   const adminStore = new AdminStore(pool);
 
+  // Privacy-safe spend accounting (HARD-RULE-024/025, FR-CP-020..030). Per-tenant
+  // HMAC keys are derived from one app-level master secret; ledger rows carry
+  // pseudonyms only, and the sole re-identification copy is expungable.
+  const ledger = new SpendLedger(
+    pool,
+    makeTenantLedgerKeyProvider({
+      appSecret: process.env['LEDGER_KEY_SECRET'] ?? tenantSecret,
+      keyId: process.env['LEDGER_KEY_ID'] ?? 'ledger-dev-1',
+    }),
+  );
+
   const executor = new RunExecutor({
     pool,
     coordinator,
@@ -175,6 +188,9 @@ async function main(): Promise<void> {
     },
     postingPolicy,
     dryRun: config.review.dryRun,
+    // Spend accounting from gateway usage (FR-CP-003); accounting failures never
+    // fail a review run (executor swallows them).
+    ledger,
     // FR-SLO-008: per-repo shadow default; composes with dryRun by OR.
     shadowResolver: adminStore,
     // Per-repo review mode (Light/Standard/Strict) presets over the controls
