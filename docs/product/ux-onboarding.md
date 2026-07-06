@@ -116,6 +116,26 @@ posting, so it can never weaken a safety gate. Mode and PRD writes reuse the
 existing `ModeStore.setMode` / `PrdSourceStore.setSource`; `repo_path`/`link`
 PRDs are read from the repository at the PR head SHA via the GitHub contents API.
 
+## Optional repo config: `.github/review-bot.yml` (HARD-RULE-UX-003)
+
+Repo-level config files are **optional advanced controls, never required for
+first use**. A repo may commit a `.github/review-bot.yml` to override its review
+mode without using the admin API:
+
+```yaml
+# .github/review-bot.yml
+review:
+  mode: strict   # light | standard | strict
+```
+
+Resolution precedence is **repo file > admin-set mode > managed default**. The
+file is read at the PR head SHA (fenced like the diff, so a mid-run edit cannot
+affect an in-flight run). It only ever selects *which preset runs* — the safety
+floor is identical across presets. An absent, unreadable, or malformed file (or
+an unknown mode value) yields no override and falls back to the stored mode:
+safe silence over unsafe guessing (HARD-RULE-UX-006). Implemented in
+`apps/ci-review-bot/src/review-modes/repo-config.ts`.
+
 ## Related Product Docs
 
 - [Review Modes](review-modes.md) — Light / Standard / Strict

@@ -18,6 +18,7 @@ import { WebhookHandler } from './handlers/webhook.handler.js';
 import { InstallationHandler } from './handlers/installation.handler.js';
 import { TenantStore } from './tenancy/tenant-store.js';
 import { ModeStore } from './review-modes/mode-store.js';
+import { RepoFileConfigResolver } from './review-modes/repo-config.js';
 import { PrdExtractor } from './prd/prd-extractor.js';
 import { PrdSourceStore, PrdResolver } from './prd/prd-store.js';
 import { ManagedPrdContextProvider } from './prd/prd-context-provider.js';
@@ -179,6 +180,9 @@ async function main(): Promise<void> {
     // Per-repo review mode (Light/Standard/Strict) presets over the controls
     // above; the safety floor is identical across modes (§10, HARD-RULE-UX-002).
     modeResolver: new ModeStore(pool),
+    // Optional `.github/review-bot.yml` opt-in layer (HARD-RULE-UX-003): its
+    // review_mode overrides the admin-stored mode, read at the PR head SHA.
+    repoConfigResolver: new RepoFileConfigResolver(new GitHubRepoFileReader(github)),
     // Requirement-aware review (Sprint 8): resolve + Gateway-extract the repo's
     // PRD, inject as dynamic context. No PRD → general review (HARD-RULE-UX-004).
     // repo_path/link PRDs are read from the repository at the PR head SHA via the

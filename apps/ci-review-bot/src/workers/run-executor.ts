@@ -3,8 +3,9 @@ import type { Category, RunIdentity } from '@review-bot/shared';
 import type { ContextPolicy, HighRiskConfig } from '@review-bot/context-engine';
 import type { ValidationPolicy } from '@review-bot/validators';
 import type { ReviewAgent } from '@review-bot/agent-core';
-import { applyMode, type EffectivePolicies } from '../review-modes/modes.js';
+import { applyMode, DEFAULT_REVIEW_MODE, type EffectivePolicies } from '../review-modes/modes.js';
 import type { ModeResolver } from '../review-modes/mode-store.js';
+import type { RepoConfigResolver } from '../review-modes/repo-config.js';
 import type { PrdContextProvider } from '../prd/prd-context-provider.js';
 import { publicStatus, type PublicStatusKind } from '../status/public-status.js';
 import { transition } from '../state-machine/machine.js';
@@ -66,6 +67,13 @@ export interface RunExecutorDeps {
    * callers are unaffected.
    */
   modeResolver?: ModeResolver;
+  /**
+   * `.github/review-bot.yml` opt-in layer (HARD-RULE-UX-003). When present its
+   * review_mode overrides the admin-stored mode for the run; absent → the
+   * stored mode stands. Optional advanced control, so an unset seam preserves
+   * the existing behavior exactly.
+   */
+  repoConfigResolver?: RepoConfigResolver;
   /**
    * PRD-derived requirement-aware review context (Sprint 8). When absent, or
    * when it returns null for a repo with no PRD, the run is a general review
@@ -157,10 +165,20 @@ export class RunExecutor {
       contextPolicy: this.deps.contextPolicy,
       maxInlineComments: this.deps.postingPolicy.maxInlineComments,
     };
-    if (!this.deps.modeResolver) {
+    // Pre-mode path preserved byte-for-byte when neither seam is wired.
+    if (!this.deps.modeResolver && !this.deps.repoConfigResolver) {
       return { ...base, suppressedCategories: new Set<Category>(), mode: 'standard' };
     }
-    const mode = await this.deps.modeResolver.resolveMode(run.tenantId, run.repo);
+    // Precedence (HARD-RULE-UX-003): .github/review-bot.yml > admin-stored mode
+    // > managed default. The opt-in file only ever OVERRIDES which preset runs;
+    // the safety floor is identical across presets (applyMode).
+    let mode = this.deps.modeResolver
+      ? await this.deps.modeResolver.resolveMode(run.tenantId, run.repo)
+      : DEFAULT_REVIEW_MODE;
+    if (this.deps.repoConfigResolver) {
+      const config = await this.deps.repoConfigResolver.resolve(run);
+      if (config?.reviewMode) mode = config.reviewMode;
+    }
     return applyMode(base, mode);
   }
 
