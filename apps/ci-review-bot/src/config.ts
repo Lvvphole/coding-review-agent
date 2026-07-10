@@ -1,7 +1,15 @@
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { parse as parseYaml } from 'yaml';
+
 /**
  * Runtime configuration with PRD v6.5 §10 defaults (id="default-config-v65").
- * File-based YAML config loading arrives with the config-precedence sprint;
- * Sprint 1 exposes the default values and env overrides needed by the slice.
+ *
+ * Config precedence: environment override > `configs/review/default.review-bot.yaml`
+ * (the documented §10 default file) > built-in fallback. Loading the YAML makes
+ * that file the single source of truth for the platform defaults; an absent or
+ * malformed file falls back to the built-in values (fail safe — never guess).
+ * Credentials and connection URLs are NEVER read from the file — env only.
  */
 
 export interface BotConfig {
@@ -58,7 +66,59 @@ export interface BotConfig {
   };
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): BotConfig {
+/** The subset of `default.review-bot.yaml` that maps onto BotConfig fields. */
+interface DefaultConfigFile {
+  review?: {
+    debounce_seconds?: number;
+    max_debounce_seconds?: number;
+    max_inline_comments?: number;
+    confidence_threshold?: number;
+    high_severity_confidence_threshold?: number;
+    require_deterministic_evidence_for_high_severity?: boolean;
+    skip_draft_prs_by_default?: boolean;
+    review_bot_authored_prs_by_default?: boolean;
+  };
+  context?: {
+    max_files?: number;
+    max_changed_lines?: number;
+    max_file_bytes?: number;
+    ignore_lockfiles_by_default?: boolean;
+    ignore_generated_files?: boolean;
+    ignore_minified_files?: boolean;
+    ignore_binary_files?: boolean;
+  };
+  webhook_idempotency?: { ttl_hours?: number };
+  pending_posts?: { lock_ttl_seconds?: number; max_retries?: number; expire_after_hours?: number };
+}
+
+/** Load the §10 default file, or {} when absent/malformed (fail safe). */
+function loadDefaultsFile(configRoot: string): DefaultConfigFile {
+  const path = join(configRoot, 'review/default.review-bot.yaml');
+  if (!existsSync(path)) return {};
+  try {
+    return (parseYaml(readFileSync(path, 'utf8')) as DefaultConfigFile) ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/** Coerce an env string to a number, or undefined when unset/blank. */
+function numEnv(value: string | undefined): number | undefined {
+  if (value === undefined || value === '') return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+export function loadConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  configRoot: string = env['CONFIG_ROOT'] ?? 'configs',
+): BotConfig {
+  const file = loadDefaultsFile(configRoot);
+  const r = file.review ?? {};
+  const c = file.context ?? {};
+  const wi = file.webhook_idempotency ?? {};
+  const pp = file.pending_posts ?? {};
+
   return {
     databaseUrl:
       env['DATABASE_URL'] ?? 'postgres://review_bot:review_bot_dev@localhost:5433/review_bot',
@@ -75,37 +135,39 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BotConfig {
       refreshBeforeExpirySeconds: 300,
       maxRefreshRetries: 2,
     },
+    // Precedence per field: env override > file default > built-in fallback.
     review: {
-      debounceSeconds: Number(env['DEBOUNCE_SECONDS'] ?? 30),
-      maxDebounceSeconds: 120,
-      maxInlineComments: 10,
-      confidenceThreshold: 0.8,
-      highSeverityConfidenceThreshold: 0.9,
-      requireDeterministicEvidenceForHighSeverity: true,
-      skipDraftPrsByDefault: true,
-      reviewBotAuthoredPrsByDefault: false,
+      debounceSeconds: numEnv(env['DEBOUNCE_SECONDS']) ?? r.debounce_seconds ?? 30,
+      maxDebounceSeconds: r.max_debounce_seconds ?? 120,
+      maxInlineComments: r.max_inline_comments ?? 10,
+      confidenceThreshold: r.confidence_threshold ?? 0.8,
+      highSeverityConfidenceThreshold: r.high_severity_confidence_threshold ?? 0.9,
+      requireDeterministicEvidenceForHighSeverity:
+        r.require_deterministic_evidence_for_high_severity ?? true,
+      skipDraftPrsByDefault: r.skip_draft_prs_by_default ?? true,
+      reviewBotAuthoredPrsByDefault: r.review_bot_authored_prs_by_default ?? false,
       dryRun: env['DRY_RUN'] === 'true',
     },
     context: {
-      maxFiles: 40,
-      maxChangedLines: 1200,
-      maxFileBytes: 80000,
-      ignoreLockfilesByDefault: true,
-      ignoreGeneratedFiles: true,
-      ignoreMinifiedFiles: true,
-      ignoreBinaryFiles: true,
+      maxFiles: c.max_files ?? 40,
+      maxChangedLines: c.max_changed_lines ?? 1200,
+      maxFileBytes: c.max_file_bytes ?? 80000,
+      ignoreLockfilesByDefault: c.ignore_lockfiles_by_default ?? true,
+      ignoreGeneratedFiles: c.ignore_generated_files ?? true,
+      ignoreMinifiedFiles: c.ignore_minified_files ?? true,
+      ignoreBinaryFiles: c.ignore_binary_files ?? true,
     },
     webhookIdempotency: {
-      ttlHours: 24,
+      ttlHours: wi.ttl_hours ?? 24,
     },
     pendingPosts: {
-      lockTtlSeconds: 120,
-      maxRetries: 3,
-      expireAfterHours: 24,
+      lockTtlSeconds: pp.lock_ttl_seconds ?? 120,
+      maxRetries: pp.max_retries ?? 3,
+      expireAfterHours: pp.expire_after_hours ?? 24,
     },
     prd: {
-      maxBytes: Number(env['PRD_MAX_BYTES'] ?? 24000),
-      maxChunks: Number(env['PRD_MAX_CHUNKS'] ?? 8),
+      maxBytes: numEnv(env['PRD_MAX_BYTES']) ?? 24000,
+      maxChunks: numEnv(env['PRD_MAX_CHUNKS']) ?? 8,
     },
   };
 }
